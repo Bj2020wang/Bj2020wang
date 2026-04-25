@@ -1,0 +1,88 @@
+/* Calendar App Styles */
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3E3E48;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4B5563;
+}
+
+/* Smooth transitions */
+* {
+  transition: background-color 200ms ease, border-color 200ms ease;
+}
+
+/* Drag ghost styling */
+[draggable="true"] {
+  user-select: none;
+}
+
+[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+/* Calendar cell hover effect */
+.calendar-cell {
+  position: relative;
+}
+
+.calendar-cell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  transition: background-color 200ms ease;
+  pointer-events: none;
+}
+
+.calendar-cell:hover::before {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Event tag animation */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.event-tag {
+  animation: slideIn 200ms ease;
+}
+
+/* Today indicator pulse */
+@keyframes pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(212, 168, 83, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(212, 168, 83, 0);
+  }
+}
+
+.today-cell {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* Drag over state */
+.drag-over {
+  background-color: #2A2A32 !important;
+  border: 2px dashed #D4A853 !important;
+}

@@ -1,0 +1,157 @@
+import { useMemo } from 'react';
+import { Check } from 'lucide-react';
+import type { DayInfo, CalendarEvent } from '@/types';
+import { WEEKDAYS, assignEventsToDays } from '@/lib/calendar-utils';
+
+interface CalendarGridProps {
+  days: DayInfo[];
+  events: CalendarEvent[];
+  onDrop: (dateStr: string) => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDragLeave: (e: React.DragEvent) => void;
+  onToggleComplete?: (eventId: string) => void;
+  onDayClick?: (dateStr: string) => void;
+  notesByDate?: Record<string, string>;
+}
+
+export default function CalendarGrid({
+  days,
+  events,
+  onDrop,
+  onDragOver,
+  onToggleComplete,
+  onDayClick,
+  notesByDate,
+}: CalendarGridProps) {
+  const daysWithEvents = useMemo(() => {
+    return assignEventsToDays(days, events);
+  }, [days, events]);
+
+  const handleDrop = (e: React.DragEvent, dateStr: string) => {
+    e.preventDefault();
+    onDrop(dateStr);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    onDragOver(e);
+  };
+
+  // Maximum number of event tags to display per cell
+  const MAX_EVENT_TAGS = 2;
+
+  return (
+    <div className="flex-1 flex flex-col h-full bg-[#212128] rounded-xl p-4">
+      {/* Weekday Headers */}
+      <div className="grid grid-cols-7 gap-0 mb-2">
+        {WEEKDAYS.map((day) => (
+          <div
+            key={day}
+            className="text-center text-sm font-medium text-[#6B7280] py-2"
+          >
+            {day}
+          </div>
+        ))}
+      </div>
+
+      {/* Calendar Grid */}
+      <div className="grid grid-cols-7 gap-px flex-1 bg-[#2E2E36] border border-[#2E2E36] rounded-lg overflow-hidden">
+        {daysWithEvents.map((day, index) => {
+          const dayEvents = day.events;
+          const holidayEvent = dayEvents.find((e) => e.id.startsWith('holiday-'));
+          const regularEvents = dayEvents.filter((e) => !e.id.startsWith('holiday-'));
+
+          // Limit displayed events
+          const visibleEvents = regularEvents.slice(0, MAX_EVENT_TAGS);
+          const overflowCount = regularEvents.length - MAX_EVENT_TAGS;
+
+          return (
+            <div
+              key={index}
+              className={`
+                relative bg-[#1E1E24] p-2 min-h-[100px] transition-colors duration-200
+                ${day.isCurrentMonth ? '' : 'opacity-50'}
+                ${day.isToday ? 'ring-1 ring-[#D4A853] ring-inset' : ''}
+                hover:bg-[#2A2A32]
+              `}
+              onClick={() => onDayClick?.(day.fullDate)}
+              onDrop={(e) => handleDrop(e, day.fullDate)}
+              onDragOver={handleDragOver}
+            >
+              {/* Date Number & Lunar */}
+              <div className="flex items-start justify-between mb-1">
+                <div className="flex items-center gap-1">
+                  <span
+                    className={`
+                      text-base font-medium
+                      ${day.isCurrentMonth ? 'text-white' : 'text-[#4B5563]'}
+                    `}
+                  >
+                    {day.date}
+                  </span>
+                  {notesByDate?.[day.fullDate]?.trim() && (
+                    <span className="text-[10px] leading-none px-1 py-0.5 rounded bg-[#D4A853] text-black">
+                      记
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  {day.isRestDay && (
+                    <span className="text-xs text-[#10B981]">休</span>
+                  )}
+                  {day.isWorkDay && (
+                    <span className="text-xs text-[#6B7280]">班</span>
+                  )}
+                  <span className="text-xs text-[#6B7280]">{day.lunarDate}</span>
+                </div>
+              </div>
+
+              {/* Holiday Tag */}
+              {holidayEvent && (
+                <div
+                  className="text-xs font-medium text-white px-2 py-0.5 rounded mb-1 truncate"
+                  style={{ backgroundColor: holidayEvent.color }}
+                >
+                  {holidayEvent.title}
+                </div>
+              )}
+
+              {/* Event Tags */}
+              <div className="flex flex-col gap-1">
+                {visibleEvents.map((event) => (
+                  <div
+                    key={event.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleComplete?.(event.id);
+                    }}
+                    className={`
+                      group text-[13px] font-medium text-white px-2 py-0.5 rounded truncate
+                      cursor-pointer transition-all duration-200 flex items-center justify-between gap-1
+                      ${event.completed ? 'opacity-50 line-through' : 'opacity-100'}
+                      hover:brightness-110
+                    `}
+                    style={{ backgroundColor: event.color }}
+                    title={event.completed ? '点击取消完成' : '点击标记完成'}
+                  >
+                    <span className="truncate">{event.title}</span>
+                    {event.completed && (
+                      <Check className="w-3.5 h-3.5 text-white flex-shrink-0" strokeWidth={3} />
+                    )}
+                  </div>
+                ))}
+
+                {/* Overflow indicator */}
+                {overflowCount > 0 && (
+                  <div className="text-xs text-[#6B7280] px-1 pt-0.5">
+                    ......
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
