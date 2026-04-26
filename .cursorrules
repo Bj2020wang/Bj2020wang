@@ -1,0 +1,11 @@
+# 项目协作规则（持续生效）
+
+1. EXE 版本号必须与 Git 标签版本号一致。
+   - 例如：`tauri.conf.json` 的 `version` 为 `0.1.2`，则 Git 标签必须是 `v0.1.2`。
+
+2. 每次发布前必须走发布脚本：
+   - 命令：`powershell -ExecutionPolicy Bypass -File .\scripts\release.ps1`
+   - 作用：校验工作区干净、校验标签一致、打包 EXE、归档到 `release/v版本号/`。
+
+3. 发布包归档规则：
+   - 安装包固定放在 `release/vX.Y.Z/` 目录下，便于回溯和分发。
