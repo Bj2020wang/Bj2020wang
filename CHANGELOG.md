@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.2
+
+- 增加全局搜索：顶部「搜索」打开弹窗，按关键词搜索**全部**日历事件。
+- 支持「仅看未完成」过滤；结果展示日期与时间，点击可跳转到当日日历视图。
+- 弹窗固定高度，列表区域内部滚动，避免随结果数量上下跳动。
+- 新增 `DateWheelPicker` 组件，预留后续按时间段筛选扩展。
+
 ## v0.1.1
 
 - Added task reminder notifications for scheduled events.
