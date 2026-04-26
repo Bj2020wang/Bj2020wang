@@ -46,6 +46,39 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: Glo
       });
   }, [events, keyword, showIncompleteOnly]);
 
+  const handleExportCsv = () => {
+    if (!keyword.trim() || results.length === 0) {
+      window.alert('当前没有可导出的搜索结果，请先输入关键词并确保有命中结果。');
+      return;
+    }
+
+    const escapeCsv = (value: string) => {
+      const escaped = value.replace(/"/g, '""');
+      return `"${escaped}"`;
+    };
+
+    const rows = [
+      ['标题', '日期', '时间', '完成状态'],
+      ...results.map((item) => [
+        item.title,
+        item.date,
+        item.time ?? '无具体时刻',
+        item.completed ? '已完成' : '未完成',
+      ]),
+    ];
+    const csvContent = rows.map((row) => row.map((cell) => escapeCsv(cell)).join(',')).join('\n');
+
+    const blob = new Blob([`\uFEFF${csvContent}`], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const now = new Date();
+    const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+    link.href = url;
+    link.download = `global-search-${stamp}.csv`;
+    link.click();
+    window.URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4">
       <div className="flex h-[min(85vh,40rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-[#2E2E36] bg-[#1A1A1F] shadow-2xl">
@@ -80,6 +113,12 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: Glo
             }`}
           >
             {showIncompleteOnly ? '仅看未完成：已开启' : '仅看未完成：已关闭'}
+          </button>
+          <button
+            onClick={handleExportCsv}
+            className="mt-2 ml-2 px-3 py-2 text-xs rounded-md border border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors"
+          >
+            导出当前结果 CSV
           </button>
         </div>
 
