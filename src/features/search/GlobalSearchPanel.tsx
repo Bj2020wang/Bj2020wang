@@ -46,6 +46,13 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: Glo
       });
   }, [events, keyword, showIncompleteOnly]);
 
+  const resultStats = useMemo(() => {
+    const total = results.length;
+    const incomplete = results.filter((item) => !item.completed).length;
+    const withTime = results.filter((item) => !!item.time).length;
+    return { total, incomplete, withTime };
+  }, [results]);
+
   const handleExportCsv = () => {
     if (!keyword.trim() || results.length === 0) {
       window.alert('当前没有可导出的搜索结果，请先输入关键词并确保有命中结果。');
@@ -120,6 +127,20 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: Glo
           >
             导出当前结果 CSV
           </button>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <div className="rounded-md border border-[#2E2E36] bg-[#111115] px-3 py-2">
+              <div className="text-[11px] text-[#6B7280]">命中总数</div>
+              <div className="text-sm font-semibold text-white">{resultStats.total}</div>
+            </div>
+            <div className="rounded-md border border-[#2E2E36] bg-[#111115] px-3 py-2">
+              <div className="text-[11px] text-[#6B7280]">未完成数</div>
+              <div className="text-sm font-semibold text-[#D4A853]">{resultStats.incomplete}</div>
+            </div>
+            <div className="rounded-md border border-[#2E2E36] bg-[#111115] px-3 py-2">
+              <div className="text-[11px] text-[#6B7280]">有具体时间</div>
+              <div className="text-sm font-semibold text-[#10B981]">{resultStats.withTime}</div>
+            </div>
+          </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
