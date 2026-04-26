@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.1
+
+- Added task reminder notifications for scheduled events.
+- Added a sidebar "Test Notification" action to quickly verify the reminder pipeline.
+- Tuned reminder checkpoints to 50/45/40/35/30/25/20/15/10/5 minutes before start.
+- Updated desktop notification integration via Tauri notification plugin.
+
 ## v0.1.0
 
 - Initial release of the Todo Calendar application.
