@@ -1,9 +1,10 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Search } from 'lucide-react';
 import TodoSidebar from '@/components/TodoSidebar';
 import CalendarGrid from '@/components/CalendarGrid';
 import WeekView from '@/components/WeekView';
 import DayView from '@/components/DayView';
+import GlobalSearchPanel from '@/features/search/GlobalSearchPanel';
 import type { ViewType, CalendarEvent, TodoItem, TodoCategory } from '@/types';
 import { getMonthDays, getWeekDays } from '@/lib/calendar-utils';
 import { useEventReminders } from '@/features/notifications/useEventReminders';
@@ -123,6 +124,7 @@ export default function App() {
   const [events, setEvents] = useState<CalendarEvent[]>(persisted?.events ?? defaultEvents);
   const [notesByDate, setNotesByDate] = useState<Record<string, string>>(persisted?.notesByDate ?? {});
   const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const draggedTodoRef = useRef<TodoItem | null>(null);
 
   useEventReminders(events);
@@ -285,6 +287,13 @@ export default function App() {
     const [y, m, d] = dateStr.split('-').map(Number);
     setCurrentDate(new Date(y, m - 1, d));
     setViewType('today');
+  }, []);
+
+  const handleSearchJumpToDate = useCallback((dateStr: string) => {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    setCurrentDate(new Date(y, m - 1, d));
+    setViewType('today');
+    setShowGlobalSearch(false);
   }, []);
 
   const handleUpdateTodo = useCallback((todoId: string, text: string, category: TodoCategory) => {
@@ -531,6 +540,14 @@ export default function App() {
         {/* Right: View Toggle */}
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setShowGlobalSearch(true)}
+            className="px-3 py-2 rounded-lg text-sm font-medium border border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors duration-200 flex items-center gap-1"
+            title="全局关键词搜索"
+          >
+            <Search className="w-4 h-4" />
+            搜索
+          </button>
+          <button
             onClick={handleToday}
             className={`
               px-4 py-2 rounded-lg text-sm font-medium border transition-colors duration-200
@@ -644,6 +661,14 @@ export default function App() {
         <div
           className="fixed inset-0 z-40"
           onClick={() => setShowMonthPicker(false)}
+        />
+      )}
+
+      {showGlobalSearch && (
+        <GlobalSearchPanel
+          events={events}
+          onClose={() => setShowGlobalSearch(false)}
+          onJumpToDate={handleSearchJumpToDate}
         />
       )}
     </div>
