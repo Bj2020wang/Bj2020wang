@@ -6,6 +6,8 @@ import WeekView from '@/components/WeekView';
 import DayView from '@/components/DayView';
 import type { ViewType, CalendarEvent, TodoItem, TodoCategory } from '@/types';
 import { getMonthDays, getWeekDays } from '@/lib/calendar-utils';
+import { useEventReminders } from '@/features/notifications/useEventReminders';
+import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import './App.css';
 
 // 2024年10月9日=周三, 10日=周四, 13日=周日
@@ -123,6 +125,8 @@ export default function App() {
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const draggedTodoRef = useRef<TodoItem | null>(null);
 
+  useEventReminders(events);
+
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth() + 1;
 
@@ -193,6 +197,7 @@ export default function App() {
         sourceTodoId: todo.id,
         startTime: time || undefined,
         endTime: time ? getEndTime(time) : undefined,
+        reminderMinutes: time ? [50, 45, 40, 35, 30, 25, 20, 15, 10, 5] : undefined,
       };
       setEvents(prev => [...prev, newEvent]);
 
@@ -362,6 +367,47 @@ export default function App() {
       }
       return { ...prev, [dateKey]: note };
     });
+  }, []);
+
+  const handleTestNotification = useCallback(async () => {
+    try {
+      let granted = false;
+      try {
+        granted = await isPermissionGranted();
+        if (!granted) {
+          const permission = await requestPermission();
+          granted = permission === 'granted';
+        }
+      } catch {
+        if (typeof Notification !== 'undefined') {
+          granted = Notification.permission === 'granted';
+          if (!granted) {
+            const permission = await Notification.requestPermission();
+            granted = permission === 'granted';
+          }
+        }
+      }
+
+      if (!granted) {
+        window.alert('通知权限未开启，请先允许通知。');
+        return;
+      }
+
+      try {
+        await sendNotification({
+          title: '通知测试',
+          body: '如果你看到这条消息，提醒功能链路正常。',
+        });
+      } catch {
+        if (typeof Notification !== 'undefined') {
+          new Notification('通知测试', {
+            body: '如果你看到这条消息，提醒功能链路正常。',
+          });
+        }
+      }
+    } catch {
+      window.alert('测试通知发送失败，请检查系统通知设置。');
+    }
   }, []);
 
   // Header label based on view
@@ -549,6 +595,7 @@ export default function App() {
           onResetLocalData={handleResetLocalData}
           onExportData={handleExportData}
           onImportData={handleImportData}
+          onTestNotification={handleTestNotification}
           noteDateKey={toDateKey(currentDate)}
           noteContent={notesByDate[toDateKey(currentDate)] ?? ''}
           onSaveNote={handleSaveNote}

@@ -20,6 +20,7 @@ export interface CalendarEvent {
   sourceTodoId?: string;
   startTime?: string;
   endTime?: string;
+  reminderMinutes?: number[];
 }
 
 export type ViewType = 'today' | 'week' | 'month';

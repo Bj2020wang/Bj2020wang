@@ -15,6 +15,7 @@ interface TodoSidebarProps {
   onResetLocalData: () => void;
   onExportData: () => void;
   onImportData: (file: File) => void;
+  onTestNotification: () => void;
   noteDateKey: string;
   noteContent: string;
   onSaveNote: (dateKey: string, note: string) => void;
@@ -38,6 +39,7 @@ export default function TodoSidebar({
   onResetLocalData,
   onExportData,
   onImportData,
+  onTestNotification,
   noteDateKey,
   noteContent,
   onSaveNote,
@@ -161,6 +163,15 @@ export default function TodoSidebar({
                 className="w-full text-left px-3 py-2 text-xs rounded-md text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors"
               >
                 导入数据
+              </button>
+              <button
+                onClick={() => {
+                  onTestNotification();
+                  setShowActionsMenu(false);
+                }}
+                className="w-full text-left px-3 py-2 text-xs rounded-md text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors"
+              >
+                测试通知
               </button>
               <button
                 onClick={() => {
