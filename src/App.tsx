@@ -5,7 +5,7 @@ import CalendarGrid from '@/components/CalendarGrid';
 import WeekView from '@/components/WeekView';
 import DayView from '@/components/DayView';
 import GlobalSearchPanel from '@/features/search/GlobalSearchPanel';
-import type { ViewType, CalendarEvent, TodoItem, TodoCategory } from '@/types';
+import type { ViewType, CalendarEvent, TodoItem, TodoCategory, TodoScopeType } from '@/types';
 import { getMonthDays, getWeekDays } from '@/lib/calendar-utils';
 import { useEventReminders } from '@/features/notifications/useEventReminders';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
@@ -444,6 +444,13 @@ export default function App() {
     const isInRange = (startDate: string, endDate: string, rangeStart: string, rangeEnd: string) =>
       !(endDate < rangeStart || startDate > rangeEnd);
 
+    const resolveTodoScope = (todo: TodoItem): TodoScopeType => {
+      if (todo.scopeType) return todo.scopeType;
+      // Backward compatible fallback for old local data.
+      if (todo.date) return 'day';
+      return 'month';
+    };
+
     const getViewRange = () => {
       if (viewType === 'today') {
         const dayKey = toDateKey(currentDate);
@@ -471,10 +478,23 @@ export default function App() {
     );
 
     return todos.filter((todo) => {
-      const byTodoDate = !!todo.date && todo.date >= start && todo.date <= end;
-      const byMonthFallback = !todo.date && viewType === 'month' && todo.month === month;
+      const scopeType = resolveTodoScope(todo);
+      const byScope = (() => {
+        if (scopeType === 'day') {
+          return !!todo.date && todo.date >= start && todo.date <= end;
+        }
+        if (scopeType === 'week') {
+          const weekStart = todo.scopeStart ?? todo.date;
+          if (!weekStart) return false;
+          const weekEnd = addDays(weekStart, 6);
+          return isInRange(weekStart, weekEnd, start, end);
+        }
+        // month scope todos only show in month list.
+        return viewType === 'month' && todo.month === month;
+      })();
+
       const byScheduledEvent = todosWithEventsInRange.has(todo.id);
-      return byTodoDate || byMonthFallback || byScheduledEvent;
+      return byScope || byScheduledEvent;
     });
   };
 
@@ -595,17 +615,27 @@ export default function App() {
           filteredTodos={filteredTodos}
           onDragStart={handleDragStart}
           onAddTodo={(text, category) =>
-            setTodos(prev => [
-              ...prev,
-              {
-                id: Date.now().toString(),
-                text,
-                category,
-                color: categoryColorMap[category],
-                month,
-                count: null,
-              },
-            ])
+            setTodos(prev => {
+              const currentDateKey = toDateKey(currentDate);
+              const currentWeekStart = getWeekDays(new Date(currentDate))[0].fullDate;
+              const scopeType: TodoScopeType =
+                viewType === 'today' ? 'day' : viewType === 'week' ? 'week' : 'month';
+
+              return [
+                ...prev,
+                {
+                  id: Date.now().toString(),
+                  text,
+                  category,
+                  color: categoryColorMap[category],
+                  month,
+                  date: scopeType === 'day' ? currentDateKey : undefined,
+                  scopeType,
+                  scopeStart: scopeType === 'week' ? currentWeekStart : undefined,
+                  count: null,
+                },
+              ];
+            })
           }
           onUpdateTodo={handleUpdateTodo}
           onDeleteTodo={handleDeleteTodo}

@@ -1,4 +1,5 @@
 export type TodoCategory = 'work' | 'life' | 'study' | 'health';
+export type TodoScopeType = 'day' | 'week' | 'month';
 
 export interface TodoItem {
   id: string;
@@ -7,6 +8,8 @@ export interface TodoItem {
   category: TodoCategory;
   month: number;
   date?: string;
+  scopeType?: TodoScopeType;
+  scopeStart?: string; // used for week-scope todos (week start date)
   count: number | null; // null means empty (not started yet)
 }
 
