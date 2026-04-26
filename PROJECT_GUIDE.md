@@ -81,7 +81,19 @@
   - `handleImportData()`
   - `handleResetLocalData()`
 
-### 2.6 EXE 打包入口
+### 2.6 提醒通知（含声音）
+- 提醒核心：`src/features/notifications/useEventReminders.ts`
+- App 接入：`src/App.tsx` 的 `useEventReminders(events)`
+- 提醒触发条件：
+  - 事件有 `startDate + startTime`
+  - 事件未完成（`completed !== true`）
+- 当前默认提醒点（测试版）：开始前 `50/45/40/35/30/25/20/15/10/5` 分钟
+- 兜底提醒：
+  - 如果事件被临近拖入时间轴，已错过常规提醒点，但开始前 5 分钟内，仍会触发一次“即将开始”
+- 测试入口：
+  - 侧栏设置菜单的“测试通知”按钮（用于快速验证系统通知链路）
+
+### 2.7 EXE 打包入口
 - 配置：`src-tauri/tauri.conf.json`
 - 命令：`npx tauri build -b nsis`
 - 已处理的拖拽兼容配置：`dragDropEnabled: false`
@@ -102,6 +114,10 @@
 ### 链路 D：笔记与标志
 保存笔记 -> `notesByDate` 更新 -> 月/周/日视图读取对应日期并显示标记
 
+### 链路 E：提醒通知
+事件被拖到时间刻度 -> 写入 `startDate/startTime` ->  
+`useEventReminders` 定时检查 -> 命中提醒窗口后发系统通知（并可带声音）  
+
 
 ## 4. 后续新增功能的防混乱规则
 
@@ -117,3 +133,10 @@
 后续如果要继续变大，建议第一步先把“本地存储相关函数”从 `App.tsx` 抽到：  
 `src/services/storage.ts`  
 这一步风险低，收益高，便于长期维护。
+
+## 6. 通知功能验证记录（2026-04-26）
+
+- 浏览器通知权限已开启（Edge）。  
+- “测试通知”按钮可正常触发通知。  
+- 自动提醒逻辑已接入并可工作。  
+- 说明：若系统处于静音、免打扰或浏览器策略限制，声音提醒可能被系统拦截，通知本身不受影响。  
