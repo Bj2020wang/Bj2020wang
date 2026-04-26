@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.3
+
+- Added one-click release script `scripts/release.ps1` for version check, NSIS build, and release artifact copy.
+- Added `.cursorrules` release conventions to keep EXE version aligned with Git tag version.
+- Fixed release script parsing issues and validated release workflow guard checks.
+
 ## v0.1.2
 
 - 增加全局搜索：顶部「搜索」打开弹窗，按关键词搜索**全部**日历事件。

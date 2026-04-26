@@ -19,7 +19,7 @@ function Get-TauriVersion {
 function Ensure-CleanGit {
   $status = git status --porcelain
   if ($status) {
-    throw "工作区有未提交改动，请先提交或暂存后再发布。"
+    throw "Working tree is dirty. Commit or stash changes before release."
   }
 }
 
@@ -33,7 +33,7 @@ function Ensure-TagMatchesHead([string]$ExpectedTag) {
     }
   }
   if (-not $matched) {
-    throw "当前 HEAD 未打标签 $ExpectedTag。请先执行: git tag -a $ExpectedTag -m `"发布 $ExpectedTag`" && git push origin $ExpectedTag"
+    throw "Missing tag on HEAD: $ExpectedTag. Create and push this tag before release."
   }
 }
 
@@ -47,7 +47,7 @@ function Build-Installer {
 function Copy-Installer([string]$VersionText) {
   $source = "C:\Users\WANGJ\tauri-cargo-target\app\release\bundle\nsis\Todo Calendar_${VersionText}_x64-setup.exe"
   if (-not (Test-Path $source)) {
-    throw "未找到安装包: $source"
+    throw "Installer not found: $source"
   }
 
   $targetDir = Join-Path $PSScriptRoot "..\release\v$VersionText"
@@ -60,30 +60,30 @@ function Copy-Installer([string]$VersionText) {
 }
 
 try {
-  Write-Step "校验 Git 工作区"
+  Write-Step "Check git working tree"
   Ensure-CleanGit
 
   $resolvedVersion = if ($Version) { $Version } else { Get-TauriVersion }
-  Write-Step "发布版本: $resolvedVersion"
+  Write-Step "Release version: $resolvedVersion"
 
   if (-not $SkipTagCheck) {
-    Write-Step "校验 Git 标签与 EXE 版本一致"
+    Write-Step "Check git tag matches EXE version"
     Ensure-TagMatchesHead "v$resolvedVersion"
   } else {
-    Write-Host "已跳过标签校验（-SkipTagCheck）" -ForegroundColor Yellow
+    Write-Host "Tag check skipped by -SkipTagCheck" -ForegroundColor Yellow
   }
 
-  Write-Step "开始打包 NSIS 安装包"
+  Write-Step "Build NSIS installer"
   Build-Installer
 
-  Write-Step "复制安装包到 release\\v$resolvedVersion"
+  Write-Step "Copy installer to release\\v$resolvedVersion"
   $outputPath = Copy-Installer $resolvedVersion
 
   Write-Host ""
-  Write-Host "发布完成" -ForegroundColor Green
-  Write-Host "安装包路径: $outputPath"
+  Write-Host "Release done" -ForegroundColor Green
+  Write-Host "Installer path: $outputPath"
 } catch {
   Write-Host ""
-  Write-Host "发布失败: $($_.Exception.Message)" -ForegroundColor Red
+  Write-Host "Release failed: $($_.Exception.Message)" -ForegroundColor Red
   exit 1
 }
