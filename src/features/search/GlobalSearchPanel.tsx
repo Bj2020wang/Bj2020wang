@@ -118,7 +118,20 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: Glo
     const total = results.length;
     const incomplete = results.filter((item) => !item.completed).length;
     const withTime = results.filter((item) => !!item.time).length;
-    return { total, incomplete, withTime };
+    const completed = total - incomplete;
+    const completionRate = total === 0 ? 0 : Math.round((completed / total) * 100);
+    return { total, incomplete, withTime, completionRate };
+  }, [results]);
+
+  const monthlyDistribution = useMemo(() => {
+    const monthCountMap: Record<string, number> = {};
+    for (const item of results) {
+      const monthKey = item.date.slice(0, 7);
+      monthCountMap[monthKey] = (monthCountMap[monthKey] ?? 0) + 1;
+    }
+    return Object.entries(monthCountMap)
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .slice(0, 6);
   }, [results]);
 
   const topQueries = useMemo(() => {
@@ -272,7 +285,7 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: Glo
               </button>
             </div>
           )}
-          <div className="mt-3 grid grid-cols-3 gap-2">
+          <div className="mt-3 grid grid-cols-4 gap-2">
             <div className="rounded-md border border-[#2E2E36] bg-[#111115] px-3 py-2">
               <div className="text-[11px] text-[#6B7280]">命中总数</div>
               <div className="text-sm font-semibold text-white">{resultStats.total}</div>
@@ -285,7 +298,26 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: Glo
               <div className="text-[11px] text-[#6B7280]">有具体时间</div>
               <div className="text-sm font-semibold text-[#10B981]">{resultStats.withTime}</div>
             </div>
+            <div className="rounded-md border border-[#2E2E36] bg-[#111115] px-3 py-2">
+              <div className="text-[11px] text-[#6B7280]">完成率</div>
+              <div className="text-sm font-semibold text-[#60A5FA]">{resultStats.completionRate}%</div>
+            </div>
           </div>
+          {!!keyword.trim() && monthlyDistribution.length > 0 && (
+            <div className="mt-2 rounded-md border border-[#2E2E36] bg-[#111115] px-3 py-2">
+              <div className="text-[11px] text-[#6B7280] mb-1">按月命中分布（最近 6 个月）</div>
+              <div className="flex flex-wrap gap-2">
+                {monthlyDistribution.map(([month, count]) => (
+                  <span
+                    key={month}
+                    className="px-2 py-1 text-xs rounded-md border border-[#3E3E48] text-[#9CA3AF]"
+                  >
+                    {month}: {count}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
