@@ -309,6 +309,18 @@ export default function App() {
   const handleAddSearchResultToTodayPlan = useCallback((title: string) => {
     const today = new Date();
     const todayKey = toDateKey(today);
+
+    const confirmed = window.confirm(`确认将“${title}”加入今日计划吗？`);
+    if (!confirmed) return;
+
+    const hasDuplicateToday = todosRef.current.some(
+      (todo) => todo.scopeType === 'day' && todo.date === todayKey && todo.text === title
+    );
+    if (hasDuplicateToday) {
+      const continueAdd = window.confirm('今日计划中已存在同名任务，是否仍然继续添加？');
+      if (!continueAdd) return;
+    }
+
     setTodos((prev) => [
       ...prev,
       {

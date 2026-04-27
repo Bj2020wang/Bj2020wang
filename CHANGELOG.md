@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.4
+
+- Added CloudBase backend dependencies for account-system integration experiments.
+- Added duplicate-confirmation guard when adding search results into today's plan.
+- Bumped app/package/Tauri versions to `0.1.4` for the next release cycle.
+
 ## v0.1.3
 
 - Added one-click release script `scripts/release.ps1` for version check, NSIS build, and release artifact copy.
