@@ -184,6 +184,22 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: Glo
     window.URL.revokeObjectURL(url);
   };
 
+  const handleRemoveQuery = (query: string) => {
+    setQueryStats((prev) => {
+      const next = { ...prev };
+      delete next[query];
+      persistQueryStats(next);
+      return next;
+    });
+  };
+
+  const handleClearQueries = () => {
+    const confirmed = window.confirm('确定清空所有常用关键词吗？');
+    if (!confirmed) return;
+    setQueryStats({});
+    persistQueryStats({});
+  };
+
   return (
     <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4">
       <div className="flex h-[min(85vh,40rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-[#2E2E36] bg-[#1A1A1F] shadow-2xl">
@@ -228,14 +244,32 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: Glo
           {topQueries.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-2">
               {topQueries.map((query) => (
-                <button
+                <span
                   key={query}
-                  onClick={() => setKeyword(query)}
-                  className="px-2 py-1 text-xs rounded-md border border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors"
+                  className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border border-[#3E3E48] text-[#9CA3AF]"
                 >
-                  {query}
-                </button>
+                  <button
+                    onClick={() => setKeyword(query)}
+                    className="hover:text-white transition-colors"
+                    title="点击搜索该关键词"
+                  >
+                    {query}
+                  </button>
+                  <button
+                    onClick={() => handleRemoveQuery(query)}
+                    className="text-[#6B7280] hover:text-[#EF4444] transition-colors"
+                    title="删除该关键词"
+                  >
+                    ×
+                  </button>
+                </span>
               ))}
+              <button
+                onClick={handleClearQueries}
+                className="px-2 py-1 text-xs rounded-md border border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors"
+              >
+                清空常用
+              </button>
             </div>
           )}
           <div className="mt-3 grid grid-cols-3 gap-2">
