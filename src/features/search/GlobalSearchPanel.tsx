@@ -16,9 +16,37 @@ interface SearchResultItem {
   completed: boolean;
 }
 
+function escapeRegExp(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: GlobalSearchPanelProps) {
   const [keyword, setKeyword] = useState('');
   const [showIncompleteOnly, setShowIncompleteOnly] = useState(false);
+
+  const renderHighlightedTitle = (title: string) => {
+    const q = keyword.trim();
+    if (!q) return title;
+
+    const matcher = new RegExp(`(${escapeRegExp(q)})`, 'ig');
+    const parts = title.split(matcher);
+    if (parts.length <= 1) return title;
+
+    return (
+      <>
+        {parts.map((part, index) => {
+          if (part.toLowerCase() === q.toLowerCase()) {
+            return (
+              <mark key={`${part}-${index}`} className="bg-[#D4A853]/30 text-[#FCD34D] rounded px-0.5">
+                {part}
+              </mark>
+            );
+          }
+          return <span key={`${part}-${index}`}>{part}</span>;
+        })}
+      </>
+    );
+  };
 
   const results = useMemo<SearchResultItem[]>(() => {
     const q = keyword.trim().toLowerCase();
@@ -162,7 +190,7 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: Glo
               className="w-full text-left mb-2 px-3 py-2 rounded-lg border border-[#2E2E36] hover:bg-[#23232B] transition-colors"
             >
               <div className="flex items-center justify-between gap-3">
-                <div className="text-sm text-white font-medium">{item.title}</div>
+                <div className="text-sm text-white font-medium">{renderHighlightedTitle(item.title)}</div>
                 <div className={`text-xs ${item.completed ? 'text-[#10B981]' : 'text-[#D4A853]'}`}>
                   {item.completed ? '已完成' : '未完成'}
                 </div>
