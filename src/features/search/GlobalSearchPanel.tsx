@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import type { CalendarEvent } from '@/types';
 
@@ -16,6 +16,45 @@ interface SearchResultItem {
   completed: boolean;
 }
 
+const SAVED_QUERIES_KEY = 'global-search-saved-queries-v1';
+const MAX_SAVED_QUERY_COUNT = 8;
+
+function loadQueryStats(): Record<string, number> {
+  try {
+    const raw = window.localStorage.getItem(SAVED_QUERIES_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+
+    if (Array.isArray(parsed)) {
+      // Backward compatibility: migrate old string list to count map.
+      return parsed.reduce<Record<string, number>>((acc, item) => {
+        if (typeof item === 'string' && item.trim()) {
+          acc[item.trim()] = 1;
+        }
+        return acc;
+      }, {});
+    }
+
+    if (parsed && typeof parsed === 'object') {
+      const obj = parsed as Record<string, unknown>;
+      const normalized: Record<string, number> = {};
+      for (const [key, value] of Object.entries(obj)) {
+        if (!key.trim()) continue;
+        const count = Number(value);
+        normalized[key] = Number.isFinite(count) && count > 0 ? Math.floor(count) : 1;
+      }
+      return normalized;
+    }
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+function persistQueryStats(stats: Record<string, number>) {
+  window.localStorage.setItem(SAVED_QUERIES_KEY, JSON.stringify(stats));
+}
+
 function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -23,6 +62,7 @@ function escapeRegExp(input: string): string {
 export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: GlobalSearchPanelProps) {
   const [keyword, setKeyword] = useState('');
   const [showIncompleteOnly, setShowIncompleteOnly] = useState(false);
+  const [queryStats, setQueryStats] = useState<Record<string, number>>(() => loadQueryStats());
 
   const renderHighlightedTitle = (title: string) => {
     const q = keyword.trim();
@@ -80,6 +120,31 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: Glo
     const withTime = results.filter((item) => !!item.time).length;
     return { total, incomplete, withTime };
   }, [results]);
+
+  const topQueries = useMemo(() => {
+    return Object.entries(queryStats)
+      .sort((a, b) => {
+        if (b[1] !== a[1]) return b[1] - a[1];
+        return a[0].localeCompare(b[0], 'zh-CN');
+      })
+      .slice(0, MAX_SAVED_QUERY_COUNT)
+      .map(([query]) => query);
+  }, [queryStats]);
+
+  useEffect(() => {
+    const q = keyword.trim();
+    if (!q) return;
+
+    const timer = window.setTimeout(() => {
+      setQueryStats((prev) => {
+        const next: Record<string, number> = { ...prev, [q]: (prev[q] ?? 0) + 1 };
+        persistQueryStats(next);
+        return next;
+      });
+    }, 800);
+
+    return () => window.clearTimeout(timer);
+  }, [keyword]);
 
   const handleExportCsv = () => {
     if (!keyword.trim() || results.length === 0) {
@@ -160,6 +225,19 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: Glo
           >
             导出当前结果 CSV
           </button>
+          {topQueries.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {topQueries.map((query) => (
+                <button
+                  key={query}
+                  onClick={() => setKeyword(query)}
+                  className="px-2 py-1 text-xs rounded-md border border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors"
+                >
+                  {query}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="mt-3 grid grid-cols-3 gap-2">
             <div className="rounded-md border border-[#2E2E36] bg-[#111115] px-3 py-2">
               <div className="text-[11px] text-[#6B7280]">命中总数</div>
