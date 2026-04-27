@@ -197,6 +197,52 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: Glo
     window.URL.revokeObjectURL(url);
   };
 
+  const handleExportBriefTxt = () => {
+    const q = keyword.trim();
+    if (!q || results.length === 0) {
+      window.alert('当前没有可导出的简报内容，请先输入关键词并确保有命中结果。');
+      return;
+    }
+
+    const now = new Date();
+    const exportTime = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const monthlyText = monthlyDistribution.length
+      ? monthlyDistribution.map(([month, count]) => `${month}: ${count}`).join('\n')
+      : '暂无';
+    const detailsText = results
+      .map((item, index) => `${index + 1}. ${item.date} ${item.time ?? '无具体时刻'} | ${item.title} | ${item.completed ? '已完成' : '未完成'}`)
+      .join('\n');
+
+    const brief = [
+      `关键词查询简报`,
+      `查询关键词：${q}`,
+      `导出时间：${exportTime}`,
+      `仅看未完成：${showIncompleteOnly ? '是' : '否'}`,
+      ``,
+      `一、核心统计`,
+      `- 命中总数：${resultStats.total}`,
+      `- 未完成数：${resultStats.incomplete}`,
+      `- 完成率：${resultStats.completionRate}%`,
+      `- 有具体时间条数：${resultStats.withTime}`,
+      ``,
+      `二、最近 6 个月命中分布`,
+      monthlyText,
+      ``,
+      `三、结果明细（按时间倒序）`,
+      detailsText,
+      ``,
+    ].join('\n');
+
+    const blob = new Blob([`\uFEFF${brief}`], { type: 'text/plain;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+    link.href = url;
+    link.download = `global-search-brief-${stamp}.txt`;
+    link.click();
+    window.URL.revokeObjectURL(url);
+  };
+
   const handleRemoveQuery = (query: string) => {
     setQueryStats((prev) => {
       const next = { ...prev };
@@ -253,6 +299,12 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: Glo
             className="mt-2 ml-2 px-3 py-2 text-xs rounded-md border border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors"
           >
             导出当前结果 CSV
+          </button>
+          <button
+            onClick={handleExportBriefTxt}
+            className="mt-2 ml-2 px-3 py-2 text-xs rounded-md border border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors"
+          >
+            导出简报 TXT
           </button>
           {topQueries.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-2">
