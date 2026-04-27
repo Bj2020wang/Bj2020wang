@@ -6,6 +6,7 @@ interface GlobalSearchPanelProps {
   events: CalendarEvent[];
   onClose: () => void;
   onJumpToDate: (dateStr: string) => void;
+  onAddToTodayPlan: (title: string) => void;
 }
 
 interface SearchResultItem {
@@ -59,7 +60,7 @@ function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: GlobalSearchPanelProps) {
+export default function GlobalSearchPanel({ events, onClose, onJumpToDate, onAddToTodayPlan }: GlobalSearchPanelProps) {
   const [keyword, setKeyword] = useState('');
   const [showIncompleteOnly, setShowIncompleteOnly] = useState(false);
   const [queryStats, setQueryStats] = useState<Record<string, number>>(() => loadQueryStats());
@@ -387,8 +388,20 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: Glo
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="text-sm text-white font-medium">{renderHighlightedTitle(item.title)}</div>
-                <div className={`text-xs ${item.completed ? 'text-[#10B981]' : 'text-[#D4A853]'}`}>
-                  {item.completed ? '已完成' : '未完成'}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAddToTodayPlan(item.title);
+                    }}
+                    className="px-2 py-1 text-[11px] rounded-md border border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors"
+                    title="加入今日计划"
+                  >
+                    加入今日计划
+                  </button>
+                  <div className={`text-xs ${item.completed ? 'text-[#10B981]' : 'text-[#D4A853]'}`}>
+                    {item.completed ? '已完成' : '未完成'}
+                  </div>
                 </div>
               </div>
               <div className="text-xs text-[#9CA3AF] mt-1">

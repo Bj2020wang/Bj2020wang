@@ -203,6 +203,16 @@ export default function App() {
       };
       setEvents(prev => [...prev, newEvent]);
 
+      // If a day-scope todo is rescheduled by drag-and-drop, move its owner date
+      // so it appears only in the target day list.
+      if (todo.scopeType === 'day') {
+        setTodos(prev =>
+          prev.map(t =>
+            t.id === todo.id ? { ...t, date: dateStr } : t
+          )
+        );
+      }
+
       // Increase repeat counter when a todo is scheduled on calendar.
       setTodos(prev =>
         prev.map(t =>
@@ -294,6 +304,26 @@ export default function App() {
     setCurrentDate(new Date(y, m - 1, d));
     setViewType('today');
     setShowGlobalSearch(false);
+  }, []);
+
+  const handleAddSearchResultToTodayPlan = useCallback((title: string) => {
+    const today = new Date();
+    const todayKey = toDateKey(today);
+    setTodos((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        text: title,
+        category: 'work',
+        color: categoryColorMap.work,
+        month: today.getMonth() + 1,
+        date: todayKey,
+        scopeType: 'day',
+        count: null,
+      },
+    ]);
+    setCurrentDate(today);
+    setViewType('today');
   }, []);
 
   const handleUpdateTodo = useCallback((todoId: string, text: string, category: TodoCategory) => {
@@ -699,6 +729,7 @@ export default function App() {
           events={events}
           onClose={() => setShowGlobalSearch(false)}
           onJumpToDate={handleSearchJumpToDate}
+          onAddToTodayPlan={handleAddSearchResultToTodayPlan}
         />
       )}
     </div>
