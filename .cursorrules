@@ -9,3 +9,11 @@
 
 3. 发布包归档规则：
    - 安装包固定放在 `release/vX.Y.Z/` 目录下，便于回溯和分发。
+
+4. CloudBase 接入特殊性（已踩坑记录）：
+   - 鉴权是双层：云函数 `invoke` 权限与 HTTP 路由鉴权是两套配置，只放开一层仍可能报 `MISSING_CREDENTIALS`。
+   - HTTP 请求体常在 `event.body`（字符串），不能直接读取 `event.action`，需先做 JSON 解析。
+   - `@cloudbase/node-sdk` 的 `add/update` 直接传字段对象，不使用 `data: {...}` 包裹。
+   - 调试与生产必须分离：调试阶段可用 `debugCode` / `debug-codes`，生产前必须移除并收紧权限。
+   - PowerShell 调用优先使用 `Invoke-RestMethod` 或 `curl.exe`，避免 `curl` 别名与 `>>` 粘贴问题。
+   - 云函数改代码优先走 `函数详情 -> 函数代码 -> index.js`；新增依赖后优先使用“保存并安装依赖”，再发布并回归测试。

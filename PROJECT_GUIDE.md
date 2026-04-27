@@ -140,3 +140,24 @@
 - “测试通知”按钮可正常触发通知。  
 - 自动提醒逻辑已接入并可工作。  
 - 说明：若系统处于静音、免打扰或浏览器策略限制，声音提醒可能被系统拦截，通知本身不受影响。  
+
+## 7. CloudBase 接入特殊性（已踩坑记录）
+
+1. 鉴权是双层：  
+   云函数 `invoke` 权限与 HTTP 路由鉴权是两套配置。只放开其中一层，仍可能报 `MISSING_CREDENTIALS`。
+
+2. HTTP 触发事件结构与常规接口不同：  
+   CloudBase HTTP 请求体常在 `event.body`（字符串），不能直接假设 `event.action` 存在，需先 `JSON.parse(event.body)`。
+
+3. Node SDK 写法与小程序 SDK 有差异：  
+   `@cloudbase/node-sdk` 的 `add/update` 直接传字段对象，不应使用 `data: {...}` 包裹。否则会出现“写入看似成功，但 where 条件查询不到”的问题。
+
+4. 调试模式与生产模式必须分离：  
+   调试阶段可返回 `debugCode`、保留 `debug-codes` action；生产前必须移除这两项并收紧权限。
+
+5. PowerShell 调用容易踩语法坑：  
+   优先使用 `Invoke-RestMethod` 或 `curl.exe`（避免 `curl` 别名歧义）；不要把提示符 `>>` 粘贴进命令。
+
+6. CloudBase 控制台函数编辑经验：  
+   修改云函数逻辑时，优先进入 `函数详情 -> 函数代码 -> index.js`。  
+   新增或变更依赖后，优先使用“保存并安装依赖”，再发布并立即回归测试。
