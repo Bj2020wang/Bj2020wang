@@ -64,13 +64,19 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: Glo
       return `"${escaped}"`;
     };
 
+    const now = new Date();
+    const exportTime = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const currentKeyword = keyword.trim();
+
     const rows = [
-      ['标题', '日期', '时间', '完成状态'],
+      ['标题', '日期', '时间', '完成状态', '关键词', '导出时间'],
       ...results.map((item) => [
         item.title,
         item.date,
         item.time ?? '无具体时刻',
         item.completed ? '已完成' : '未完成',
+        currentKeyword,
+        exportTime,
       ]),
     ];
     const csvContent = rows.map((row) => row.map((cell) => escapeCsv(cell)).join(',')).join('\n');
@@ -78,7 +84,6 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate }: Glo
     const blob = new Blob([`\uFEFF${csvContent}`], { type: 'text/csv;charset=utf-8;' });
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
-    const now = new Date();
     const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
     link.href = url;
     link.download = `global-search-${stamp}.csv`;
