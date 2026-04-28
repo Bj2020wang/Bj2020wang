@@ -1,10 +1,11 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, ChevronDown, Search } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Search, User } from 'lucide-react';
 import TodoSidebar from '@/components/TodoSidebar';
 import CalendarGrid from '@/components/CalendarGrid';
 import WeekView from '@/components/WeekView';
 import DayView from '@/components/DayView';
 import GlobalSearchPanel from '@/features/search/GlobalSearchPanel';
+import AccountLoginModal from '@/features/account/AccountLoginModal';
 import type { ViewType, CalendarEvent, TodoItem, TodoCategory, TodoScopeType } from '@/types';
 import { getMonthDays, getWeekDays } from '@/lib/calendar-utils';
 import { useEventReminders } from '@/features/notifications/useEventReminders';
@@ -39,6 +40,16 @@ interface PersistedData {
   viewType: ViewType;
   eventsByDate: Record<string, string[]>;
   notesByDate: Record<string, string>;
+}
+
+function isPersistedDataLike(value: unknown): value is PersistedData {
+  if (!value || typeof value !== 'object') return false;
+  const data = value as Partial<PersistedData>;
+  if (!Array.isArray(data.todos) || !Array.isArray(data.events)) return false;
+  if (typeof data.currentDate !== 'string') return false;
+  if (!data.viewType || !['today', 'week', 'month'].includes(data.viewType)) return false;
+  if (!data.notesByDate || typeof data.notesByDate !== 'object') return false;
+  return true;
 }
 
 const toDateKey = (date: Date): string => {
@@ -125,6 +136,7 @@ export default function App() {
   const [notesByDate, setNotesByDate] = useState<Record<string, string>>(persisted?.notesByDate ?? {});
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
+  const [showAccountLogin, setShowAccountLogin] = useState(false);
   const draggedTodoRef = useRef<TodoItem | null>(null);
 
   useEventReminders(events);
@@ -542,6 +554,27 @@ export default function App() {
 
   const filteredTodos = getFilteredTodos();
 
+  const getAccountSnapshot = useCallback((): PersistedData => {
+    return createPersistedPayload(todos, events, currentDate, viewType, notesByDate);
+  }, [todos, events, currentDate, viewType, notesByDate]);
+
+  const applyAccountSnapshot = useCallback((snapshot: unknown) => {
+    if (!isPersistedDataLike(snapshot)) {
+      throw new Error('云端快照格式无效，无法应用到本地');
+    }
+
+    const nextDate = new Date(snapshot.currentDate);
+    if (Number.isNaN(nextDate.getTime())) {
+      throw new Error('云端快照中的日期无效');
+    }
+
+    setTodos(snapshot.todos);
+    setEvents(snapshot.events);
+    setCurrentDate(nextDate);
+    setViewType(snapshot.viewType);
+    setNotesByDate(snapshot.notesByDate);
+  }, []);
+
   return (
     <div className="h-screen w-screen bg-[#1A1A1F] flex flex-col p-6 overflow-hidden">
       {/* Header */}
@@ -608,6 +641,15 @@ export default function App() {
           >
             <Search className="w-4 h-4" />
             搜索
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowAccountLogin(true)}
+            className="px-3 py-2 rounded-lg text-sm font-medium border border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors duration-200 flex items-center gap-1"
+            title="账号登录与云端同步（演示）"
+          >
+            <User className="w-4 h-4" />
+            账号
           </button>
           <button
             onClick={handleToday}
@@ -742,6 +784,14 @@ export default function App() {
           onClose={() => setShowGlobalSearch(false)}
           onJumpToDate={handleSearchJumpToDate}
           onAddToTodayPlan={handleAddSearchResultToTodayPlan}
+        />
+      )}
+
+      {showAccountLogin && (
+        <AccountLoginModal
+          onClose={() => setShowAccountLogin(false)}
+          onPullSnapshot={applyAccountSnapshot}
+          onPushSnapshot={getAccountSnapshot}
         />
       )}
     </div>
