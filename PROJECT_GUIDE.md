@@ -161,3 +161,20 @@
 6. CloudBase 控制台函数编辑经验：  
    修改云函数逻辑时，优先进入 `函数详情 -> 函数代码 -> index.js`。  
    新增或变更依赖后，优先使用“保存并安装依赖”，再发布并立即回归测试。
+
+## 8. 账号系统一期速查表（文件-函数-按钮）
+
+| 按钮/动作 | 先看文件 | 关键函数/入口 | 最终调用 |
+|---|---|---|---|
+| 顶部「账号」 | `src/App.tsx` | `setShowAccountLogin(true)` | 打开 `AccountLoginModal` |
+| 发送验证码 | `src/features/account/AccountLoginModal.tsx` | `handleSend()` | `useAccountAuth.sendCode()` -> `authApi.sendCode()` -> `/test` `action=send-code` |
+| 验证并登录 | `src/features/account/AccountLoginModal.tsx` | `handleVerify()` | `useAccountAuth.verify()` -> `authApi.verifyCode()` -> `/test` `action=verify-code` |
+| 匿名登录（自动） | `src/features/account/cloudbase.ts` | `ensureAnonymousSignIn()` | CloudBase `auth.signInAnonymously()` |
+| 取访问令牌（自动） | `src/features/account/cloudbase.ts` | `getCloudbaseAccessToken()` | CloudBase `auth.getAccessToken()` |
+| 推送云端 | `src/features/account/AccountLoginModal.tsx` + `src/App.tsx` | `handlePush()` + `getAccountSnapshot()` | `authApi.pushSnapshot()` -> `/test` `action=push` |
+| 拉取云端 | `src/features/account/AccountLoginModal.tsx` + `src/App.tsx` | `handlePull()` + `applyAccountSnapshot()` | `authApi.pullSnapshot()` -> `/test` `action=pull` |
+| 接口地址/环境切换 | `src/features/account/config.ts` | `getAccountHttpUrl()` / `CLOUDBASE_ENV_ID` | 控制请求目标 |
+| 环境变量声明 | `src/vite-env.d.ts` | `VITE_CLOUDBASE_ENV_ID` / `VITE_ACCOUNT_HTTP_BASE` | 供 TS 校验与读取 |
+| 接口封装总入口 | `src/features/account/authApi.ts` | `postAccountAction()` | 统一 `POST /test` + Bearer |
+
+一句话定位法：按钮问题看 `AccountLoginModal`；接口问题看 `authApi`；`ACTION_FORBIDDEN` 先查路由身份认证；拉取/推送问题看 `App.tsx` 快照导入导出函数。
