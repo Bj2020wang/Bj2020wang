@@ -1,7 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { useAccountAuth } from './useAccountAuth';
 import type { SnapshotHistoryItem } from './authApi';
+
+const AUTO_PUSH_IDLE_MS = 30_000;
+const AUTO_PUSH_INTERVAL_MS = 60_000;
+const AUTO_PUSH_ENABLED_KEY = 'todo-calendar-auto-push-enabled';
 
 interface AccountLoginModalProps {
   onClose: () => void;
@@ -28,6 +32,13 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
   const [error, setError] = useState('');
   const [historyItems, setHistoryItems] = useState<SnapshotHistoryItem[]>([]);
   const [syncStatus, setSyncStatus] = useState('');
+  const [hasPendingSync, setHasPendingSync] = useState(false);
+  const [autoPushEnabled, setAutoPushEnabled] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(AUTO_PUSH_ENABLED_KEY) === '1';
+  });
+  const lastActivityAtRef = useRef(Date.now());
+  const lastAutoPushAtRef = useRef(0);
 
   const readUpdatedAt = (value: unknown): number | null => {
     if (!value || typeof value !== 'object') return null;
@@ -40,38 +51,55 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
     return new Date(ts).toLocaleString('zh-CN', { hour12: false });
   };
 
-  const checkSyncStatus = async (token: string): Promise<void> => {
+  const checkSyncStatus = async (
+    token: string
+  ): Promise<{ localUpdatedAt: number | null; cloudUpdatedAt: number | null; localIsNewer: boolean }> => {
     const localSnapshot = onPushSnapshot();
     const localUpdatedAt = readUpdatedAt(localSnapshot);
     const cloudRes = await pullSnapshot(token);
     const cloudUpdatedAt = typeof cloudRes.data?.updatedAt === 'number' ? cloudRes.data.updatedAt : null;
+    const localIsNewer = !!localUpdatedAt && (!cloudUpdatedAt || localUpdatedAt > cloudUpdatedAt);
+    setHasPendingSync(localIsNewer);
 
     if (!localUpdatedAt && !cloudUpdatedAt) {
       setSyncStatus('暂无可比较的同步时间');
-      return;
+      return { localUpdatedAt, cloudUpdatedAt, localIsNewer };
     }
     if (cloudUpdatedAt && (!localUpdatedAt || cloudUpdatedAt > localUpdatedAt)) {
       setSyncStatus('检测到云端有更新，建议先拉取云端');
-      return;
+      return { localUpdatedAt, cloudUpdatedAt, localIsNewer };
     }
-    if (localUpdatedAt && (!cloudUpdatedAt || localUpdatedAt > cloudUpdatedAt)) {
+    if (localIsNewer) {
       setSyncStatus('检测到本地有未推送更新，建议推送云端');
-      return;
+      return { localUpdatedAt, cloudUpdatedAt, localIsNewer };
     }
     setSyncStatus('本地与云端已同步');
+    return { localUpdatedAt, cloudUpdatedAt, localIsNewer };
   };
 
   useEffect(() => {
     if (!businessToken) {
       setSyncStatus('');
       setHistoryItems([]);
+      setHasPendingSync(false);
       return;
     }
 
     let cancelled = false;
     const tick = async () => {
       try {
-        await checkSyncStatus(businessToken);
+        const summary = await checkSyncStatus(businessToken);
+        if (!autoPushEnabled || busy || !summary.localIsNewer) return;
+        const now = Date.now();
+        const isIdle = now - lastActivityAtRef.current >= AUTO_PUSH_IDLE_MS;
+        const intervalOk = now - lastAutoPushAtRef.current >= AUTO_PUSH_INTERVAL_MS;
+        if (!isIdle || !intervalOk) return;
+
+        const localSnapshot = onPushSnapshot();
+        await pushSnapshot(businessToken, localSnapshot);
+        lastAutoPushAtRef.current = Date.now();
+        setHasPendingSync(false);
+        setSyncStatus('空闲自动推送完成');
       } catch {
         if (!cancelled) {
           setSyncStatus('');
@@ -88,7 +116,36 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [businessToken]);
+  }, [autoPushEnabled, businessToken, busy]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(AUTO_PUSH_ENABLED_KEY, autoPushEnabled ? '1' : '0');
+  }, [autoPushEnabled]);
+
+  useEffect(() => {
+    if (!businessToken || !autoPushEnabled) return;
+    const markActive = () => {
+      lastActivityAtRef.current = Date.now();
+    };
+    const events: Array<keyof WindowEventMap> = ['mousemove', 'keydown', 'mousedown', 'touchstart', 'scroll'];
+    events.forEach((name) => window.addEventListener(name, markActive, { passive: true }));
+    return () => {
+      events.forEach((name) => window.removeEventListener(name, markActive));
+    };
+  }, [autoPushEnabled, businessToken]);
+
+  useEffect(() => {
+    if (!businessToken || !hasPendingSync) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => {
+      window.removeEventListener('beforeunload', handler);
+    };
+  }, [businessToken, hasPendingSync]);
 
   const handleSend = async () => {
     setError('');
@@ -291,6 +348,18 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
               {error || hint || syncStatus}
             </p>
           )}
+
+          {businessToken ? (
+            <label className="flex items-center gap-2 text-xs text-[#9CA3AF]">
+              <input
+                type="checkbox"
+                checked={autoPushEnabled}
+                onChange={(e) => setAutoPushEnabled(e.target.checked)}
+                disabled={busy}
+              />
+              开启空闲自动推送（空闲 30 秒，最短间隔 60 秒）
+            </label>
+          ) : null}
 
           <div className="flex flex-wrap gap-2 pt-1">
             <button
