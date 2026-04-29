@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { useAccountAuth } from './useAccountAuth';
 import type { SnapshotHistoryItem } from './authApi';
@@ -27,6 +27,7 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [historyItems, setHistoryItems] = useState<SnapshotHistoryItem[]>([]);
+  const [syncStatus, setSyncStatus] = useState('');
 
   const readUpdatedAt = (value: unknown): number | null => {
     if (!value || typeof value !== 'object') return null;
@@ -38,6 +39,56 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
     if (!ts) return '未知';
     return new Date(ts).toLocaleString('zh-CN', { hour12: false });
   };
+
+  const checkSyncStatus = async (token: string): Promise<void> => {
+    const localSnapshot = onPushSnapshot();
+    const localUpdatedAt = readUpdatedAt(localSnapshot);
+    const cloudRes = await pullSnapshot(token);
+    const cloudUpdatedAt = typeof cloudRes.data?.updatedAt === 'number' ? cloudRes.data.updatedAt : null;
+
+    if (!localUpdatedAt && !cloudUpdatedAt) {
+      setSyncStatus('暂无可比较的同步时间');
+      return;
+    }
+    if (cloudUpdatedAt && (!localUpdatedAt || cloudUpdatedAt > localUpdatedAt)) {
+      setSyncStatus('检测到云端有更新，建议先拉取云端');
+      return;
+    }
+    if (localUpdatedAt && (!cloudUpdatedAt || localUpdatedAt > cloudUpdatedAt)) {
+      setSyncStatus('检测到本地有未推送更新，建议推送云端');
+      return;
+    }
+    setSyncStatus('本地与云端已同步');
+  };
+
+  useEffect(() => {
+    if (!businessToken) {
+      setSyncStatus('');
+      setHistoryItems([]);
+      return;
+    }
+
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        await checkSyncStatus(businessToken);
+      } catch {
+        if (!cancelled) {
+          setSyncStatus('');
+        }
+      }
+    };
+
+    void tick();
+    const timer = window.setInterval(() => {
+      void tick();
+    }, 60_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [businessToken]);
 
   const handleSend = async () => {
     setError('');
@@ -235,9 +286,9 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
             </label>
           </div>
 
-          {(error || hint) && (
+          {(error || hint || syncStatus) && (
             <p className={`text-sm ${error ? 'text-red-400' : 'text-[#9CA3AF]'}`}>
-              {error || hint}
+              {error || hint || syncStatus}
             </p>
           )}
 
