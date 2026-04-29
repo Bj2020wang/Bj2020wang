@@ -95,6 +95,16 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
     setBusy(true);
     try {
       const localSnapshot = onPushSnapshot();
+      const localUpdatedAt = readUpdatedAt(localSnapshot);
+      const cloudRes = await pullSnapshot(businessToken);
+      const cloudUpdatedAt = typeof cloudRes.data?.updatedAt === 'number' ? cloudRes.data.updatedAt : null;
+      const confirmed = window.confirm(
+        `确认将本地数据推送到云端吗？\n本地更新时间：${formatTime(localUpdatedAt)}\n云端更新时间：${formatTime(cloudUpdatedAt)}`
+      );
+      if (!confirmed) {
+        setHint('已取消推送，保留云端数据');
+        return;
+      }
       await pushSnapshot(businessToken, localSnapshot);
       setHint('已将本地数据推送到云端');
     } catch (e) {
