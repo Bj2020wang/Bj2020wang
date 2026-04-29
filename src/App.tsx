@@ -35,11 +35,13 @@ const STORAGE_KEY = 'todo-calendar-local-v1';
 
 interface PersistedData {
   todos: TodoItem[];
+  todoTombstones?: Record<string, number>;
   events: CalendarEvent[];
   currentDate: string;
   viewType: ViewType;
   eventsByDate: Record<string, string[]>;
   notesByDate: Record<string, string>;
+  noteMetaByDate?: Record<string, number>;
   updatedAt?: number;
 }
 
@@ -113,19 +115,203 @@ const inferCategoryFromColor = (color: string): TodoCategory => {
 
 const createPersistedPayload = (
   todos: TodoItem[],
+  todoTombstones: Record<string, number>,
   events: CalendarEvent[],
   currentDate: Date,
   viewType: ViewType,
-  notesByDate: Record<string, string>
+  notesByDate: Record<string, string>,
+  noteMetaByDate: Record<string, number>
 ): PersistedData => ({
   todos,
+  todoTombstones,
   events,
   currentDate: currentDate.toISOString(),
   viewType,
   eventsByDate: buildEventsByDate(events),
   notesByDate,
+  noteMetaByDate,
   updatedAt: Date.now(),
 });
+
+const readTodoUpdatedAt = (todo: TodoItem): number =>
+  typeof todo.updatedAt === 'number' && Number.isFinite(todo.updatedAt) ? todo.updatedAt : 0;
+
+const TODO_COMPARE_FIELDS: Array<keyof TodoItem> = [
+  'text',
+  'color',
+  'category',
+  'month',
+  'date',
+  'scopeType',
+  'scopeStart',
+  'count',
+];
+
+const readEventUpdatedAt = (event: CalendarEvent): number =>
+  typeof event.updatedAt === 'number' && Number.isFinite(event.updatedAt) ? event.updatedAt : 0;
+
+const EVENT_COMPARE_FIELDS: Array<keyof CalendarEvent> = [
+  'title',
+  'color',
+  'startDate',
+  'endDate',
+  'completed',
+  'sourceTodoId',
+  'startTime',
+  'endTime',
+  'reminderMinutes',
+];
+
+const mergeTodoRecords = (
+  localTodos: TodoItem[],
+  localTombstones: Record<string, number>,
+  cloudTodos: TodoItem[],
+  cloudTombstones: Record<string, number>
+): { todos: TodoItem[]; tombstones: Record<string, number>; fieldMergeCount: number; conflictCount: number } => {
+  const mergedTombstones: Record<string, number> = { ...localTombstones };
+  Object.entries(cloudTombstones).forEach(([id, ts]) => {
+    if (!Number.isFinite(ts)) return;
+    mergedTombstones[id] = Math.max(mergedTombstones[id] ?? 0, ts);
+  });
+
+  let fieldMergeCount = 0;
+  let conflictCount = 0;
+  const localMap = new Map(localTodos.map((todo) => [todo.id, todo]));
+  const cloudMap = new Map(cloudTodos.map((todo) => [todo.id, todo]));
+  const allIds = new Set<string>([...localMap.keys(), ...cloudMap.keys()]);
+
+  const mergedTodos: TodoItem[] = [];
+  allIds.forEach((id) => {
+    const localTodo = localMap.get(id);
+    const cloudTodo = cloudMap.get(id);
+    if (!localTodo && !cloudTodo) return;
+    let todo = localTodo ?? cloudTodo!;
+
+    if (localTodo && cloudTodo) {
+      const localAt = readTodoUpdatedAt(localTodo);
+      const cloudAt = readTodoUpdatedAt(cloudTodo);
+      const newer = localAt >= cloudAt ? localTodo : cloudTodo;
+      const older = localAt >= cloudAt ? cloudTodo : localTodo;
+
+      const mergedTodo: TodoItem = { ...newer };
+      let mergedAnyField = false;
+      let conflictOnThisTodo = false;
+
+      for (const key of TODO_COMPARE_FIELDS) {
+        const newerVal = newer[key];
+        const olderVal = older[key];
+        if (newerVal === olderVal) continue;
+        if (newerVal === undefined && olderVal !== undefined) {
+          mergedTodo[key] = olderVal as never;
+          mergedAnyField = true;
+          continue;
+        }
+        if (olderVal === undefined && newerVal !== undefined) {
+          mergedTodo[key] = newerVal as never;
+          mergedAnyField = true;
+          continue;
+        }
+        conflictOnThisTodo = true;
+      }
+
+      if (mergedAnyField) fieldMergeCount += 1;
+      if (conflictOnThisTodo) conflictCount += 1;
+      todo = mergedTodo;
+    }
+
+    const deletedAt = mergedTombstones[id] ?? 0;
+    if (deletedAt >= readTodoUpdatedAt(todo)) return;
+    mergedTodos.push(todo);
+  });
+
+  return { todos: mergedTodos, tombstones: mergedTombstones, fieldMergeCount, conflictCount };
+};
+
+const mergeEventRecords = (
+  localEvents: CalendarEvent[],
+  cloudEvents: CalendarEvent[]
+): { events: CalendarEvent[]; fieldMergeCount: number; conflictCount: number } => {
+  let fieldMergeCount = 0;
+  let conflictCount = 0;
+  const localMap = new Map(localEvents.map((event) => [event.id, event]));
+  const cloudMap = new Map(cloudEvents.map((event) => [event.id, event]));
+  const allIds = new Set<string>([...localMap.keys(), ...cloudMap.keys()]);
+  const mergedEvents: CalendarEvent[] = [];
+
+  allIds.forEach((id) => {
+    const localEvent = localMap.get(id);
+    const cloudEvent = cloudMap.get(id);
+    if (!localEvent && !cloudEvent) return;
+    if (!localEvent || !cloudEvent) {
+      mergedEvents.push(localEvent ?? cloudEvent!);
+      return;
+    }
+
+    const localAt = readEventUpdatedAt(localEvent);
+    const cloudAt = readEventUpdatedAt(cloudEvent);
+    const newer = localAt >= cloudAt ? localEvent : cloudEvent;
+    const older = localAt >= cloudAt ? cloudEvent : localEvent;
+    const mergedEvent: CalendarEvent = { ...newer };
+    let mergedAnyField = false;
+    let conflictOnThisEvent = false;
+
+    for (const key of EVENT_COMPARE_FIELDS) {
+      const newerVal = newer[key];
+      const olderVal = older[key];
+      if (newerVal === olderVal) continue;
+      if (newerVal === undefined && olderVal !== undefined) {
+        mergedEvent[key] = olderVal as never;
+        mergedAnyField = true;
+        continue;
+      }
+      if (olderVal === undefined && newerVal !== undefined) {
+        mergedEvent[key] = newerVal as never;
+        mergedAnyField = true;
+        continue;
+      }
+      conflictOnThisEvent = true;
+    }
+
+    if (mergedAnyField) fieldMergeCount += 1;
+    if (conflictOnThisEvent) conflictCount += 1;
+    mergedEvents.push(mergedEvent);
+  });
+
+  return { events: mergedEvents, fieldMergeCount, conflictCount };
+};
+
+const mergeNoteRecords = (
+  localNotes: Record<string, string>,
+  localMeta: Record<string, number>,
+  cloudNotes: Record<string, string>,
+  cloudMeta: Record<string, number>
+): { notesByDate: Record<string, string>; noteMetaByDate: Record<string, number>; mergeCount: number } => {
+  const mergedNotes: Record<string, string> = {};
+  const mergedMeta: Record<string, number> = {};
+  let mergeCount = 0;
+  const allKeys = new Set<string>([
+    ...Object.keys(localNotes),
+    ...Object.keys(cloudNotes),
+    ...Object.keys(localMeta),
+    ...Object.keys(cloudMeta),
+  ]);
+
+  allKeys.forEach((key) => {
+    const localAt = Number.isFinite(localMeta[key]) ? localMeta[key] : 0;
+    const cloudAt = Number.isFinite(cloudMeta[key]) ? cloudMeta[key] : 0;
+    const useCloud = cloudAt > localAt;
+    const chosenAt = useCloud ? cloudAt : localAt;
+    const chosenText = useCloud ? (cloudNotes[key] ?? '') : (localNotes[key] ?? '');
+
+    if (localAt > 0 && cloudAt > 0 && localAt !== cloudAt) {
+      mergeCount += 1;
+    }
+    if (chosenAt > 0) mergedMeta[key] = chosenAt;
+    if (chosenText.trim()) mergedNotes[key] = chosenText;
+  });
+
+  return { notesByDate: mergedNotes, noteMetaByDate: mergedMeta, mergeCount };
+};
 
 export default function App() {
   const [persisted] = useState<PersistedData | null>(() => loadPersistedData());
@@ -134,11 +320,17 @@ export default function App() {
   ); // Oct 15, 2024
   const [viewType, setViewType] = useState<ViewType>(persisted?.viewType ?? 'month');
   const [todos, setTodos] = useState<TodoItem[]>(persisted?.todos ?? defaultTodos);
+  const [todoTombstones, setTodoTombstones] = useState<Record<string, number>>(persisted?.todoTombstones ?? {});
   const [events, setEvents] = useState<CalendarEvent[]>(persisted?.events ?? defaultEvents);
   const [notesByDate, setNotesByDate] = useState<Record<string, string>>(persisted?.notesByDate ?? {});
+  const [noteMetaByDate, setNoteMetaByDate] = useState<Record<string, number>>(persisted?.noteMetaByDate ?? {});
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const [showAccountLogin, setShowAccountLogin] = useState(false);
+  const [accountSyncRuntime, setAccountSyncRuntime] = useState<'未登录' | '同步中' | '空闲'>('未登录');
+  const [todoMergeHint, setTodoMergeHint] = useState('');
+  const [eventMergeHint, setEventMergeHint] = useState('');
+  const [noteMergeHint, setNoteMergeHint] = useState('');
   const draggedTodoRef = useRef<TodoItem | null>(null);
 
   useEventReminders(events);
@@ -157,9 +349,9 @@ export default function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const payload = createPersistedPayload(todos, events, currentDate, viewType, notesByDate);
+    const payload = createPersistedPayload(todos, todoTombstones, events, currentDate, viewType, notesByDate, noteMetaByDate);
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  }, [todos, events, currentDate, viewType, notesByDate]);
+  }, [todos, todoTombstones, events, currentDate, viewType, notesByDate, noteMetaByDate]);
 
   // Navigation: prev/next based on current view
   const handlePrev = () => {
@@ -214,6 +406,7 @@ export default function App() {
         startTime: time || undefined,
         endTime: time ? getEndTime(time) : undefined,
         reminderMinutes: time ? [50, 45, 40, 35, 30, 25, 20, 15, 10, 5] : undefined,
+        updatedAt: Date.now(),
       };
       setEvents(prev => [...prev, newEvent]);
 
@@ -222,7 +415,7 @@ export default function App() {
       if (todo.scopeType === 'day') {
         setTodos(prev =>
           prev.map(t =>
-            t.id === todo.id ? { ...t, date: dateStr } : t
+            t.id === todo.id ? { ...t, date: dateStr, updatedAt: Date.now() } : t
           )
         );
       }
@@ -230,7 +423,7 @@ export default function App() {
       // Increase repeat counter when a todo is scheduled on calendar.
       setTodos(prev =>
         prev.map(t =>
-          t.id === todo.id ? { ...t, count: (t.count ?? 0) + 1 } : t
+          t.id === todo.id ? { ...t, count: (t.count ?? 0) + 1, updatedAt: Date.now() } : t
         )
       );
 
@@ -249,12 +442,12 @@ export default function App() {
       prev.map(ev => {
         if (ev.id !== eventId) return ev;
         if (!newTime) {
-          return { ...ev, startTime: undefined, endTime: undefined };
+          return { ...ev, startTime: undefined, endTime: undefined, updatedAt: Date.now() };
         }
         const [h, m] = newTime.split(':').map(Number);
         const endH = h + 1;
         const endTime = `${String(endH).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-        return { ...ev, startTime: newTime, endTime };
+        return { ...ev, startTime: newTime, endTime, updatedAt: Date.now() };
       })
     );
   }, []);
@@ -268,7 +461,7 @@ export default function App() {
 
     setEvents(prev =>
       prev.map(ev =>
-        ev.id === eventId ? { ...ev, completed: newCompleted } : ev
+        ev.id === eventId ? { ...ev, completed: newCompleted, updatedAt: Date.now() } : ev
       )
     );
 
@@ -277,7 +470,7 @@ export default function App() {
         // Task completed: decrease counter.
         setTodos(prev =>
           prev.map(t =>
-            t.id === todoId ? { ...t, count: Math.max(0, (t.count ?? 0) - 1) } : t
+            t.id === todoId ? { ...t, count: Math.max(0, (t.count ?? 0) - 1), updatedAt: Date.now() } : t
           )
         );
       } else {
@@ -286,7 +479,7 @@ export default function App() {
           const existing = prev.find(t => t.id === todoId);
           if (existing) {
             return prev.map(t =>
-              t.id === todoId ? { ...t, count: (t.count ?? 0) + 1 } : t
+              t.id === todoId ? { ...t, count: (t.count ?? 0) + 1, updatedAt: Date.now() } : t
             );
           }
           return [...prev, {
@@ -296,6 +489,7 @@ export default function App() {
             category: inferCategoryFromColor(event.color),
             month: monthRef.current,
             count: 1,
+            updatedAt: Date.now(),
           }];
         });
       }
@@ -346,6 +540,7 @@ export default function App() {
         date: todayKey,
         scopeType: 'day',
         count: null,
+        updatedAt: Date.now(),
       },
     ]);
     setCurrentDate(today);
@@ -355,17 +550,18 @@ export default function App() {
   const handleUpdateTodo = useCallback((todoId: string, text: string, category: TodoCategory) => {
     const nextColor = categoryColorMap[category];
     setTodos((prev) =>
-      prev.map((todo) => (todo.id === todoId ? { ...todo, text, category, color: nextColor } : todo))
+      prev.map((todo) => (todo.id === todoId ? { ...todo, text, category, color: nextColor, updatedAt: Date.now() } : todo))
     );
     setEvents((prev) =>
       prev.map((event) =>
-        event.sourceTodoId === todoId ? { ...event, title: text, color: nextColor } : event
+        event.sourceTodoId === todoId ? { ...event, title: text, color: nextColor, updatedAt: Date.now() } : event
       )
     );
   }, []);
 
   const handleDeleteTodo = useCallback((todoId: string) => {
     setTodos((prev) => prev.filter((todo) => todo.id !== todoId));
+    setTodoTombstones((prev) => ({ ...prev, [todoId]: Date.now() }));
     setEvents((prev) => prev.filter((event) => event.sourceTodoId !== todoId));
   }, []);
 
@@ -378,14 +574,16 @@ export default function App() {
     setCurrentDate(new Date(2024, 9, 15));
     setViewType('month');
     setTodos(defaultTodos);
+    setTodoTombstones({});
     setEvents(defaultEvents);
     setNotesByDate({});
+    setNoteMetaByDate({});
     setShowMonthPicker(false);
   }, []);
 
   const handleExportData = useCallback(() => {
     if (typeof window === 'undefined') return;
-    const payload = createPersistedPayload(todos, events, currentDate, viewType, notesByDate);
+    const payload = createPersistedPayload(todos, todoTombstones, events, currentDate, viewType, notesByDate, noteMetaByDate);
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = window.URL.createObjectURL(blob);
     const anchor = document.createElement('a');
@@ -393,7 +591,7 @@ export default function App() {
     anchor.download = `todo-calendar-backup-${toDateKey(new Date())}.json`;
     anchor.click();
     window.URL.revokeObjectURL(url);
-  }, [todos, events, currentDate, viewType, notesByDate]);
+  }, [todos, todoTombstones, events, currentDate, viewType, notesByDate, noteMetaByDate]);
 
   const handleImportData = useCallback(async (file: File) => {
     try {
@@ -410,10 +608,12 @@ export default function App() {
       }
 
       setTodos(parsed.todos);
+      setTodoTombstones(parsed.todoTombstones ?? {});
       setEvents(parsed.events);
       setCurrentDate(new Date(parsed.currentDate));
       setViewType(parsed.viewType);
       setNotesByDate(parsed.notesByDate ?? {});
+      setNoteMetaByDate(parsed.noteMetaByDate ?? {});
       setShowMonthPicker(false);
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
       window.alert('导入成功。');
@@ -432,6 +632,7 @@ export default function App() {
       }
       return { ...prev, [dateKey]: note };
     });
+    setNoteMetaByDate((prev) => ({ ...prev, [dateKey]: Date.now() }));
   }, []);
 
   const handleTestNotification = useCallback(async () => {
@@ -557,8 +758,8 @@ export default function App() {
   const filteredTodos = getFilteredTodos();
 
   const getAccountSnapshot = useCallback((): PersistedData => {
-    return createPersistedPayload(todos, events, currentDate, viewType, notesByDate);
-  }, [todos, events, currentDate, viewType, notesByDate]);
+    return createPersistedPayload(todos, todoTombstones, events, currentDate, viewType, notesByDate, noteMetaByDate);
+  }, [todos, todoTombstones, events, currentDate, viewType, notesByDate, noteMetaByDate]);
 
   const applyAccountSnapshot = useCallback((snapshot: unknown) => {
     if (!isPersistedDataLike(snapshot)) {
@@ -570,12 +771,43 @@ export default function App() {
       throw new Error('云端快照中的日期无效');
     }
 
-    setTodos(snapshot.todos);
-    setEvents(snapshot.events);
+    const merged = mergeTodoRecords(
+      todosRef.current,
+      todoTombstones,
+      snapshot.todos,
+      snapshot.todoTombstones ?? {}
+    );
+    const mergedEvents = mergeEventRecords(eventsRef.current, snapshot.events);
+    const mergedNotes = mergeNoteRecords(notesByDate, noteMetaByDate, snapshot.notesByDate ?? {}, snapshot.noteMetaByDate ?? {});
+    setTodos(merged.todos);
+    setTodoTombstones(merged.tombstones);
+    if (merged.fieldMergeCount > 0 || merged.conflictCount > 0) {
+      const parts: string[] = [];
+      if (merged.fieldMergeCount > 0) parts.push(`自动合并 ${merged.fieldMergeCount} 条`);
+      if (merged.conflictCount > 0) parts.push(`冲突保留较新 ${merged.conflictCount} 条`);
+      setTodoMergeHint(parts.join('，'));
+    } else {
+      setTodoMergeHint('');
+    }
+    if (mergedEvents.fieldMergeCount > 0 || mergedEvents.conflictCount > 0) {
+      const parts: string[] = [];
+      if (mergedEvents.fieldMergeCount > 0) parts.push(`事件自动合并 ${mergedEvents.fieldMergeCount} 条`);
+      if (mergedEvents.conflictCount > 0) parts.push(`事件冲突保留较新 ${mergedEvents.conflictCount} 条`);
+      setEventMergeHint(parts.join('，'));
+    } else {
+      setEventMergeHint('');
+    }
+    if (mergedNotes.mergeCount > 0) {
+      setNoteMergeHint(`备注自动合并 ${mergedNotes.mergeCount} 条`);
+    } else {
+      setNoteMergeHint('');
+    }
+    setEvents(mergedEvents.events);
     setCurrentDate(nextDate);
     setViewType(snapshot.viewType);
-    setNotesByDate(snapshot.notesByDate);
-  }, []);
+    setNotesByDate(mergedNotes.notesByDate);
+    setNoteMetaByDate(mergedNotes.noteMetaByDate);
+  }, [noteMetaByDate, notesByDate, todoTombstones]);
 
   return (
     <div className="h-screen w-screen bg-[#1A1A1F] flex flex-col p-6 overflow-hidden">
@@ -653,6 +885,10 @@ export default function App() {
             <User className="w-4 h-4" />
             账号
           </button>
+          <span className="text-xs text-[#9CA3AF]">{accountSyncRuntime}</span>
+          {todoMergeHint ? <span className="text-xs text-[#D4A853]">{todoMergeHint}</span> : null}
+          {eventMergeHint ? <span className="text-xs text-[#D4A853]">{eventMergeHint}</span> : null}
+          {noteMergeHint ? <span className="text-xs text-[#D4A853]">{noteMergeHint}</span> : null}
           <button
             onClick={handleToday}
             className={`
@@ -719,6 +955,7 @@ export default function App() {
                   scopeType,
                   scopeStart: scopeType === 'week' ? currentWeekStart : undefined,
                   count: null,
+                  updatedAt: Date.now(),
                 },
               ];
             })
@@ -789,13 +1026,13 @@ export default function App() {
         />
       )}
 
-      {showAccountLogin && (
-        <AccountLoginModal
-          onClose={() => setShowAccountLogin(false)}
-          onPullSnapshot={applyAccountSnapshot}
-          onPushSnapshot={getAccountSnapshot}
-        />
-      )}
+      <AccountLoginModal
+        open={showAccountLogin}
+        onClose={() => setShowAccountLogin(false)}
+        onPullSnapshot={applyAccountSnapshot}
+        onPushSnapshot={getAccountSnapshot}
+        onRuntimeStatusChange={setAccountSyncRuntime}
+      />
     </div>
   );
 }

@@ -21,6 +21,8 @@ export const ACCOUNT_TOKEN_KEY = 'todo-calendar-account-token';
 /** 云开发内置邮箱验证码流程：发码接口返回的 verification_id（与邮箱成对暂存） */
 export const ACCOUNT_VERIFICATION_ID_KEY = 'todo-calendar-account-verification-id';
 export const ACCOUNT_VERIFICATION_EMAIL_KEY = 'todo-calendar-account-verification-email';
+export const ACCOUNT_BASE_VERSION_KEY = 'todo-calendar-account-base-version';
+export const ACCOUNT_DEVICE_ID_KEY = 'todo-calendar-account-device-id';
 
 export function getAccountHttpOrigin(): string {
   const fromEnv = import.meta.env.VITE_ACCOUNT_HTTP_BASE?.trim();

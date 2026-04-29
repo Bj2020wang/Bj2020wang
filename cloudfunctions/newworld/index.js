@@ -15,9 +15,11 @@ const https = require('https');
 const cloudbase = require('@cloudbase/node-sdk');
 const crypto = require('crypto');
 const SNAPSHOT_HISTORY_LIMIT = 3;
+const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
 const db = app.database();
+const _ = db.command;
 
 function jsonResponse(statusCode, bodyObj) {
   return {
@@ -122,9 +124,24 @@ async function removeTokensForEmail(email) {
   await db.collection('user_tokens').where({ email }).remove();
 }
 
+async function cleanupExpiredTokensForEmail(email) {
+  var now = Date.now();
+  await db
+    .collection('user_tokens')
+    .where({
+      email: email,
+      expiresAt: _.lt(now),
+    })
+    .remove();
+}
+
 function isCollectionMissingError(err) {
   var msg = err && err.message ? String(err.message) : '';
   return msg.includes('Db or Table not exist') || msg.includes('collection not exists');
+}
+
+function toNumberOrNull(v) {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
 exports.main = async function (event) {
@@ -251,11 +268,16 @@ async function handleVerifyCode(payload) {
   }
 
   var token = randomToken();
-  await removeTokensForEmail(email);
+  var deviceId = String(payload.deviceId || '').trim() || 'unknown-device';
+  var platform = String(payload.platform || '').trim() || 'web';
+  var expiresAt = Date.now() + TOKEN_TTL_MS;
   await db.collection('user_tokens').add({
     email: email,
     token: token,
     createdAt: verifiedAt,
+    expiresAt: expiresAt,
+    deviceId: deviceId,
+    platform: platform,
   });
 
   return ok({ token: token, email: email });
@@ -267,7 +289,16 @@ async function resolveEmailByToken(token) {
   var res = await db.collection('user_tokens').where({ token: t }).limit(1).get();
   var data = res.data;
   if (!data || !data[0]) return null;
-  return data[0].email || null;
+  var item = data[0];
+  var expiresAt = toNumberOrNull(item.expiresAt);
+  var now = Date.now();
+  // 最小安全策略：旧 token（无 expiresAt）按失效处理，防止长期有效。
+  if (expiresAt == null || expiresAt < now) {
+    await db.collection('user_tokens').doc(item._id).remove();
+    return null;
+  }
+  await cleanupExpiredTokensForEmail(item.email);
+  return item.email || null;
 }
 
 async function trimSnapshotHistory(email) {
@@ -309,6 +340,9 @@ async function handlePull(payload) {
     email: email,
     snapshot: doc.snapshot != null ? doc.snapshot : null,
     updatedAt: doc.updatedAt != null ? doc.updatedAt : null,
+    version: toNumberOrNull(doc.version) != null ? doc.version : 0,
+    lastWriterDeviceId: typeof doc.lastWriterDeviceId === 'string' ? doc.lastWriterDeviceId : null,
+    lastWriterPlatform: typeof doc.lastWriterPlatform === 'string' ? doc.lastWriterPlatform : null,
   });
 }
 
@@ -320,15 +354,44 @@ async function handlePush(payload) {
 
   var snapshot = payload.snapshot;
   var updatedAt = Date.now();
+  var baseVersionRaw = payload.baseVersion;
+  var baseVersion = typeof baseVersionRaw === 'number' && Number.isFinite(baseVersionRaw) ? baseVersionRaw : 0;
+  var forcePush = payload.force === true;
+  var deviceId = String(payload.deviceId || '').trim() || 'unknown-device';
+  var platform = String(payload.platform || '').trim() || 'web';
 
   var existing = await db.collection('user_snapshots').where({ email: email }).limit(1).get();
   if (existing.data && existing.data[0]) {
     var previous = existing.data[0];
+    var currentVersion = toNumberOrNull(previous.version);
+    if (currentVersion == null) currentVersion = 0;
+
+    if (!forcePush && baseVersion !== currentVersion) {
+      return jsonResponse(409, {
+        code: 409,
+        message: '云端数据已更新，请先拉取或确认覆盖',
+        data: {
+          currentVersion: currentVersion,
+          incomingBaseVersion: baseVersion,
+          lastWriterDeviceId:
+            typeof previous.lastWriterDeviceId === 'string' ? previous.lastWriterDeviceId : null,
+          lastWriterPlatform:
+            typeof previous.lastWriterPlatform === 'string' ? previous.lastWriterPlatform : null,
+          updatedAt: typeof previous.updatedAt === 'number' ? previous.updatedAt : null,
+        },
+      });
+    }
+
     try {
       await db.collection('user_snapshot_histories').add({
         email: email,
         snapshot: previous.snapshot,
         updatedAt: typeof previous.updatedAt === 'number' ? previous.updatedAt : null,
+        version: currentVersion,
+        lastWriterDeviceId:
+          typeof previous.lastWriterDeviceId === 'string' ? previous.lastWriterDeviceId : null,
+        lastWriterPlatform:
+          typeof previous.lastWriterPlatform === 'string' ? previous.lastWriterPlatform : null,
         backupAt: updatedAt,
       });
       await trimSnapshotHistory(email);
@@ -339,16 +402,32 @@ async function handlePush(payload) {
     await db.collection('user_snapshots').doc(existing.data[0]._id).update({
       snapshot: snapshot,
       updatedAt: updatedAt,
+      version: currentVersion + 1,
+      lastWriterDeviceId: deviceId,
+      lastWriterPlatform: platform,
+    });
+    return ok({
+      email: email,
+      updatedAt: updatedAt,
+      version: currentVersion + 1,
+      forceApplied: forcePush,
     });
   } else {
     await db.collection('user_snapshots').add({
       email: email,
       snapshot: snapshot,
       updatedAt: updatedAt,
+      version: 1,
+      lastWriterDeviceId: deviceId,
+      lastWriterPlatform: platform,
+    });
+    return ok({
+      email: email,
+      updatedAt: updatedAt,
+      version: 1,
+      forceApplied: forcePush,
     });
   }
-
-  return ok({ email: email, updatedAt: updatedAt });
 }
 
 async function handleListHistory(payload) {

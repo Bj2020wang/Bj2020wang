@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react';
 import {
+  ACCOUNT_BASE_VERSION_KEY,
+  ACCOUNT_DEVICE_ID_KEY,
   ACCOUNT_TOKEN_KEY,
   ACCOUNT_VERIFICATION_EMAIL_KEY,
   ACCOUNT_VERIFICATION_ID_KEY,
@@ -11,9 +13,31 @@ function readStoredToken(): string | null {
   return sessionStorage.getItem(ACCOUNT_TOKEN_KEY);
 }
 
+function ensureDeviceId(): string {
+  if (typeof window === 'undefined') return 'web-unknown';
+  const existed = localStorage.getItem(ACCOUNT_DEVICE_ID_KEY);
+  if (existed) return existed;
+  const id =
+    'web-' +
+    (typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2));
+  localStorage.setItem(ACCOUNT_DEVICE_ID_KEY, id);
+  return id;
+}
+
+function readBaseVersion(): number {
+  if (typeof window === 'undefined') return 0;
+  const raw = localStorage.getItem(ACCOUNT_BASE_VERSION_KEY);
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
 export function useAccountAuth() {
   const [businessToken, setBusinessToken] = useState<string | null>(() => readStoredToken());
   const [hint, setHint] = useState('');
+  const [baseVersion, setBaseVersion] = useState<number>(() => readBaseVersion());
+  const [deviceId] = useState<string>(() => ensureDeviceId());
 
   const persistBusinessToken = useCallback((token: string | null) => {
     setBusinessToken(token);
@@ -66,6 +90,13 @@ export function useAccountAuth() {
     }
   }, [persistBusinessToken]);
 
+  const updateBaseVersion = useCallback((next: number) => {
+    setBaseVersion(next);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(ACCOUNT_BASE_VERSION_KEY, String(next));
+    }
+  }, []);
+
   const withAuthGuard = useCallback(
     async <T>(run: () => Promise<T>): Promise<T> => {
       try {
@@ -88,10 +119,30 @@ export function useAccountAuth() {
     sendCode,
     verify,
     logout,
+    baseVersion,
+    deviceId,
     persistBusinessToken,
-    pullSnapshot: (token: string) => withAuthGuard(() => api.pullSnapshot(token)),
-    pushSnapshot: (token: string, snapshot: unknown) =>
-      withAuthGuard(() => api.pushSnapshot(token, snapshot)),
+    pullSnapshot: (token: string, opts?: { syncBaseVersion?: boolean }) =>
+      withAuthGuard(async () => {
+        const res = await api.pullSnapshot(token);
+        const ver = typeof res.data?.version === 'number' ? res.data.version : 0;
+        if (opts?.syncBaseVersion !== false) {
+          updateBaseVersion(ver);
+        }
+        return res;
+      }),
+    pushSnapshot: (token: string, snapshot: unknown, opts?: { force?: boolean }) =>
+      withAuthGuard(async () => {
+        const res = await api.pushSnapshot(token, snapshot, {
+          baseVersion,
+          deviceId,
+          platform: 'web',
+          force: opts?.force === true,
+        });
+        const ver = typeof res.data?.version === 'number' ? res.data.version : baseVersion;
+        updateBaseVersion(ver);
+        return res;
+      }),
     listSnapshotHistory: (token: string) => withAuthGuard(() => api.listSnapshotHistory(token)),
     restoreSnapshotHistory: (token: string, historyId: string) =>
       withAuthGuard(() => api.restoreSnapshotHistory(token, historyId)),

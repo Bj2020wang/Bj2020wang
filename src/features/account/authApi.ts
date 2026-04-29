@@ -14,6 +14,20 @@ export class AccountAuthExpiredError extends Error {
   }
 }
 
+export class AccountSyncConflictError extends Error {
+  currentVersion: number | null;
+  updatedAt: number | null;
+  constructor(
+    message = '云端数据已更新，请先拉取或确认覆盖',
+    opts?: { currentVersion?: number | null; updatedAt?: number | null }
+  ) {
+    super(message);
+    this.name = 'AccountSyncConflictError';
+    this.currentVersion = opts?.currentVersion ?? null;
+    this.updatedAt = opts?.updatedAt ?? null;
+  }
+}
+
 export type SnapshotHistoryItem = {
   id: string;
   backupAt?: number | null;
@@ -46,11 +60,25 @@ export async function postAccountAction<T = unknown>(body: {
     if (res.status === 401) {
       throw new AccountAuthExpiredError(json.message || '登录已失效，请重新验证');
     }
+    if (res.status === 409 || json.code === 409) {
+      const data = (json.data ?? {}) as { currentVersion?: number; updatedAt?: number };
+      throw new AccountSyncConflictError(json.message || '云端数据已更新，请先拉取或确认覆盖', {
+        currentVersion: typeof data.currentVersion === 'number' ? data.currentVersion : null,
+        updatedAt: typeof data.updatedAt === 'number' ? data.updatedAt : null,
+      });
+    }
     throw new Error(json.message || `请求失败 HTTP ${res.status}`);
   }
   if (json.code !== 0) {
     if (json.code === 401) {
       throw new AccountAuthExpiredError(json.message || '登录已失效，请重新验证');
+    }
+    if (json.code === 409) {
+      const data = (json.data ?? {}) as { currentVersion?: number; updatedAt?: number };
+      throw new AccountSyncConflictError(json.message || '云端数据已更新，请先拉取或确认覆盖', {
+        currentVersion: typeof data.currentVersion === 'number' ? data.currentVersion : null,
+        updatedAt: typeof data.updatedAt === 'number' ? data.updatedAt : null,
+      });
     }
     throw new Error(json.message || '接口返回错误');
   }
@@ -77,16 +105,34 @@ export function verifyCode(email: string, code: string, verificationId: string) 
 }
 
 export function pullSnapshot(token: string) {
-  return postAccountAction<{ email: string; snapshot: unknown; updatedAt?: number | null }>({
+  return postAccountAction<{
+    email: string;
+    snapshot: unknown;
+    updatedAt?: number | null;
+    version?: number;
+    lastWriterDeviceId?: string | null;
+    lastWriterPlatform?: string | null;
+  }>({
     action: 'pull',
     payload: { token },
   });
 }
 
-export function pushSnapshot(token: string, snapshot: unknown) {
-  return postAccountAction<{ email: string; updatedAt: number }>({
+export function pushSnapshot(
+  token: string,
+  snapshot: unknown,
+  opts?: { baseVersion?: number; deviceId?: string; platform?: string; force?: boolean }
+) {
+  return postAccountAction<{ email: string; updatedAt: number; version: number; forceApplied?: boolean }>({
     action: 'push',
-    payload: { token, snapshot },
+    payload: {
+      token,
+      snapshot,
+      baseVersion: opts?.baseVersion ?? 0,
+      deviceId: opts?.deviceId,
+      platform: opts?.platform ?? 'web',
+      force: opts?.force === true,
+    },
   });
 }
 

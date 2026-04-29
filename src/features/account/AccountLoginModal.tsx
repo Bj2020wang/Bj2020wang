@@ -1,19 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { useAccountAuth } from './useAccountAuth';
+import { AccountSyncConflictError } from './authApi';
 import type { SnapshotHistoryItem } from './authApi';
 
 const AUTO_PUSH_IDLE_MS = 30_000;
 const AUTO_PUSH_INTERVAL_MS = 60_000;
 const AUTO_PUSH_ENABLED_KEY = 'todo-calendar-auto-push-enabled';
+const AUTO_PUSH_LAST_AT_KEY = 'todo-calendar-auto-push-last-at';
+const FIRST_PULL_DONE_KEY = 'todo-calendar-first-pull-done';
+const ACCOUNT_LAST_PULL_AT_KEY = 'todo-calendar-account-last-pull-at';
+const ACCOUNT_LAST_PUSH_AT_KEY = 'todo-calendar-account-last-push-at';
 
 interface AccountLoginModalProps {
+  open: boolean;
   onClose: () => void;
   onPullSnapshot: (snapshot: unknown) => void;
   onPushSnapshot: () => unknown;
+  onRuntimeStatusChange?: (status: '未登录' | '同步中' | '空闲') => void;
 }
 
-export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnapshot }: AccountLoginModalProps) {
+export default function AccountLoginModal({
+  open,
+  onClose,
+  onPullSnapshot,
+  onPushSnapshot,
+  onRuntimeStatusChange,
+}: AccountLoginModalProps) {
   const {
     businessToken,
     hint,
@@ -25,6 +38,7 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
     pushSnapshot,
     listSnapshotHistory,
     restoreSnapshotHistory,
+    baseVersion,
   } = useAccountAuth();
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
@@ -37,8 +51,40 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(AUTO_PUSH_ENABLED_KEY) === '1';
   });
+  const [hasPulledOnce, setHasPulledOnce] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(FIRST_PULL_DONE_KEY) === '1';
+  });
+  const [lastAutoPushAt, setLastAutoPushAt] = useState<number | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const raw = window.localStorage.getItem(AUTO_PUSH_LAST_AT_KEY);
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  });
+  const [lastPullAt, setLastPullAt] = useState<number | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const raw = window.localStorage.getItem(ACCOUNT_LAST_PULL_AT_KEY);
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  });
+  const [lastPushAt, setLastPushAt] = useState<number | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const raw = window.localStorage.getItem(ACCOUNT_LAST_PUSH_AT_KEY);
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  });
   const lastActivityAtRef = useRef(Date.now());
   const lastAutoPushAtRef = useRef(0);
+  const lastReportedRuntimeRef = useRef<string>('');
+
+  const reportRuntime = (status: '未登录' | '同步中' | '空闲') => {
+    if (lastReportedRuntimeRef.current === status) return;
+    lastReportedRuntimeRef.current = status;
+    onRuntimeStatusChange?.(status);
+  };
 
   const readUpdatedAt = (value: unknown): number | null => {
     if (!value || typeof value !== 'object') return null;
@@ -51,30 +97,63 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
     return new Date(ts).toLocaleString('zh-CN', { hour12: false });
   };
 
+  const normalizeSnapshotForCompare = (value: unknown): unknown => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+    const cloned = { ...(value as Record<string, unknown>) };
+    delete cloned.updatedAt;
+    return cloned;
+  };
+
+  const toComparableString = (value: unknown): string => {
+    try {
+      return JSON.stringify(normalizeSnapshotForCompare(value));
+    } catch {
+      return '';
+    }
+  };
+
   const checkSyncStatus = async (
     token: string
-  ): Promise<{ localUpdatedAt: number | null; cloudUpdatedAt: number | null; localIsNewer: boolean }> => {
+  ): Promise<{
+    localUpdatedAt: number | null;
+    cloudUpdatedAt: number | null;
+    localIsNewer: boolean;
+    cloudHasNewerVersion: boolean;
+    cloudVersion: number;
+  }> => {
     const localSnapshot = onPushSnapshot();
     const localUpdatedAt = readUpdatedAt(localSnapshot);
-    const cloudRes = await pullSnapshot(token);
+    const cloudRes = await pullSnapshot(token, { syncBaseVersion: false });
+    const cloudSnapshot = cloudRes.data?.snapshot;
     const cloudUpdatedAt = typeof cloudRes.data?.updatedAt === 'number' ? cloudRes.data.updatedAt : null;
-    const localIsNewer = !!localUpdatedAt && (!cloudUpdatedAt || localUpdatedAt > cloudUpdatedAt);
+    const cloudVersion = typeof cloudRes.data?.version === 'number' ? cloudRes.data.version : 0;
+    const cloudHasNewerVersion = cloudVersion > baseVersion;
+    const localComparable = toComparableString(localSnapshot);
+    const cloudComparable = toComparableString(cloudSnapshot);
+    const snapshotDifferent = localComparable !== '' && cloudComparable !== '' && localComparable !== cloudComparable;
+    const localIsNewer =
+      !cloudHasNewerVersion &&
+      (snapshotDifferent || (!!localUpdatedAt && (!cloudUpdatedAt || localUpdatedAt > cloudUpdatedAt)));
     setHasPendingSync(localIsNewer);
 
     if (!localUpdatedAt && !cloudUpdatedAt) {
       setSyncStatus('暂无可比较的同步时间');
-      return { localUpdatedAt, cloudUpdatedAt, localIsNewer };
+      return { localUpdatedAt, cloudUpdatedAt, localIsNewer, cloudHasNewerVersion, cloudVersion };
+    }
+    if (cloudHasNewerVersion) {
+      setSyncStatus('检测到云端有更新，建议先拉取云端');
+      return { localUpdatedAt, cloudUpdatedAt, localIsNewer, cloudHasNewerVersion, cloudVersion };
     }
     if (cloudUpdatedAt && (!localUpdatedAt || cloudUpdatedAt > localUpdatedAt)) {
       setSyncStatus('检测到云端有更新，建议先拉取云端');
-      return { localUpdatedAt, cloudUpdatedAt, localIsNewer };
+      return { localUpdatedAt, cloudUpdatedAt, localIsNewer, cloudHasNewerVersion, cloudVersion };
     }
     if (localIsNewer) {
       setSyncStatus('检测到本地有未推送更新，建议推送云端');
-      return { localUpdatedAt, cloudUpdatedAt, localIsNewer };
+      return { localUpdatedAt, cloudUpdatedAt, localIsNewer, cloudHasNewerVersion, cloudVersion };
     }
     setSyncStatus('本地与云端已同步');
-    return { localUpdatedAt, cloudUpdatedAt, localIsNewer };
+    return { localUpdatedAt, cloudUpdatedAt, localIsNewer, cloudHasNewerVersion, cloudVersion };
   };
 
   useEffect(() => {
@@ -82,28 +161,57 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
       setSyncStatus('');
       setHistoryItems([]);
       setHasPendingSync(false);
+      reportRuntime('未登录');
       return;
     }
 
     let cancelled = false;
     const tick = async () => {
+      reportRuntime('同步中');
       try {
         const summary = await checkSyncStatus(businessToken);
-        if (!autoPushEnabled || busy || !summary.localIsNewer) return;
+        if (summary.cloudHasNewerVersion) {
+          if (summary.localIsNewer) {
+            setSyncStatus('检测到云端更新，但本地有未同步改动；请先手动处理，避免覆盖');
+          } else {
+            setSyncStatus('检测到云端有更新，建议手动拉取云端');
+          }
+          reportRuntime('空闲');
+          return;
+        }
+        if (!autoPushEnabled || !hasPulledOnce || busy || summary.cloudHasNewerVersion || !summary.localIsNewer) {
+          reportRuntime('空闲');
+          return;
+        }
         const now = Date.now();
         const isIdle = now - lastActivityAtRef.current >= AUTO_PUSH_IDLE_MS;
         const intervalOk = now - lastAutoPushAtRef.current >= AUTO_PUSH_INTERVAL_MS;
-        if (!isIdle || !intervalOk) return;
+        if (!isIdle || !intervalOk) {
+          reportRuntime('空闲');
+          return;
+        }
 
         const localSnapshot = onPushSnapshot();
         await pushSnapshot(businessToken, localSnapshot);
-        lastAutoPushAtRef.current = Date.now();
+        const pushedAt = Date.now();
+        lastAutoPushAtRef.current = pushedAt;
+        setLastAutoPushAt(pushedAt);
+        window.localStorage.setItem(AUTO_PUSH_LAST_AT_KEY, String(pushedAt));
+        setLastPushAt(pushedAt);
+        window.localStorage.setItem(ACCOUNT_LAST_PUSH_AT_KEY, String(pushedAt));
         setHasPendingSync(false);
         setSyncStatus('空闲自动推送完成');
-      } catch {
+        reportRuntime('空闲');
+      } catch (e) {
+        if (e instanceof AccountSyncConflictError) {
+          if (!cancelled) setSyncStatus('自动推送遇到版本冲突，建议先拉取云端');
+          reportRuntime('空闲');
+          return;
+        }
         if (!cancelled) {
           setSyncStatus('');
         }
+        reportRuntime('空闲');
       }
     };
 
@@ -116,7 +224,7 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [autoPushEnabled, businessToken, busy]);
+  }, [autoPushEnabled, baseVersion, businessToken, busy, hasPulledOnce, onRuntimeStatusChange]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -192,13 +300,18 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
       const res = await pullSnapshot(businessToken);
       const cloudUpdatedAt = typeof res.data?.updatedAt === 'number' ? res.data.updatedAt : null;
       const confirmed = window.confirm(
-        `确认用云端数据覆盖本地吗？\n云端更新时间：${formatTime(cloudUpdatedAt)}\n本地更新时间：${formatTime(localUpdatedAt)}`
+        `确认用云端数据覆盖本地吗？\n注意：会覆盖本地未上云的改动。\n云端写入时间：${formatTime(cloudUpdatedAt)}\n本地保存时间：${formatTime(localUpdatedAt)}`
       );
       if (!confirmed) {
         setHint('已取消拉取，保留本地数据');
         return;
       }
       onPullSnapshot(res.data?.snapshot ?? null);
+      const pulledAt = Date.now();
+      setLastPullAt(pulledAt);
+      window.localStorage.setItem(ACCOUNT_LAST_PULL_AT_KEY, String(pulledAt));
+      setHasPulledOnce(true);
+      window.localStorage.setItem(FIRST_PULL_DONE_KEY, '1');
       setHint('已从云端拉取并应用到本地');
     } catch (e) {
       setError(e instanceof Error ? e.message : '拉取失败');
@@ -220,15 +333,32 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
       const cloudRes = await pullSnapshot(businessToken);
       const cloudUpdatedAt = typeof cloudRes.data?.updatedAt === 'number' ? cloudRes.data.updatedAt : null;
       const confirmed = window.confirm(
-        `确认将本地数据推送到云端吗？\n本地更新时间：${formatTime(localUpdatedAt)}\n云端更新时间：${formatTime(cloudUpdatedAt)}`
+        `确认将本地数据推送到云端吗？\n本地保存时间：${formatTime(localUpdatedAt)}\n云端写入时间：${formatTime(cloudUpdatedAt)}`
       );
       if (!confirmed) {
         setHint('已取消推送，保留云端数据');
         return;
       }
       await pushSnapshot(businessToken, localSnapshot);
+      const pushedAt = Date.now();
+      setLastPushAt(pushedAt);
+      window.localStorage.setItem(ACCOUNT_LAST_PUSH_AT_KEY, String(pushedAt));
       setHint('已将本地数据推送到云端');
     } catch (e) {
+      if (e instanceof AccountSyncConflictError) {
+        const doForce = window.confirm(
+          `检测到云端版本已变化（当前基线版本：${baseVersion}）。\n` +
+            `可先拉取云端再处理，或点“确定”强制用本地覆盖云端。`
+        );
+        if (doForce) {
+          const localSnapshot = onPushSnapshot();
+          await pushSnapshot(businessToken, localSnapshot, { force: true });
+          setHint('已强制推送本地数据并覆盖云端');
+          return;
+        }
+        setHint('已取消推送，建议先拉取云端后再处理');
+        return;
+      }
       setError(e instanceof Error ? e.message : '推送失败');
     } finally {
       setBusy(false);
@@ -281,6 +411,8 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
       setBusy(false);
     }
   };
+
+  if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
@@ -354,11 +486,34 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
               <input
                 type="checkbox"
                 checked={autoPushEnabled}
-                onChange={(e) => setAutoPushEnabled(e.target.checked)}
+                onChange={(e) => {
+                  if (e.target.checked && !hasPulledOnce) {
+                    window.alert('首次登录请先执行一次“拉取云端”，再开启自动推送。');
+                    setAutoPushEnabled(false);
+                    return;
+                  }
+                  setAutoPushEnabled(e.target.checked);
+                }}
                 disabled={busy}
               />
               开启空闲自动推送（空闲 30 秒，最短间隔 60 秒）
             </label>
+          ) : null}
+
+          {businessToken && !hasPulledOnce ? (
+            <p className="text-xs text-amber-300">首次登录请先拉取云端，避免自动推送覆盖云端数据。</p>
+          ) : null}
+
+          {businessToken && autoPushEnabled ? (
+            <p className="text-xs text-[#9CA3AF]">
+              上次自动推送时间：{formatTime(lastAutoPushAt)}
+            </p>
+          ) : null}
+          {businessToken ? (
+            <p className="text-xs text-[#9CA3AF]">上次拉取时间：{formatTime(lastPullAt)}</p>
+          ) : null}
+          {businessToken ? (
+            <p className="text-xs text-[#9CA3AF]">上次推送时间：{formatTime(lastPushAt)}</p>
           ) : null}
 
           <div className="flex flex-wrap gap-2 pt-1">

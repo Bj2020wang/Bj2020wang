@@ -11,6 +11,7 @@ export interface TodoItem {
   scopeType?: TodoScopeType;
   scopeStart?: string; // used for week-scope todos (week start date)
   count: number | null; // null means empty (not started yet)
+  updatedAt?: number;
 }
 
 export interface CalendarEvent {
@@ -24,6 +25,7 @@ export interface CalendarEvent {
   startTime?: string;
   endTime?: string;
   reminderMinutes?: number[];
+  updatedAt?: number;
 }
 
 export type ViewType = 'today' | 'week' | 'month';
