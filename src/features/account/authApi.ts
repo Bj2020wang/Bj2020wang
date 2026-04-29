@@ -1,4 +1,4 @@
-import { getCloudbaseAccessToken } from './cloudbase';
+import { getHttpAuthorizationToken } from './cloudbase';
 import { getAccountHttpUrl } from './config';
 
 export type AccountApiEnvelope<T = unknown> = {
@@ -11,7 +11,7 @@ export async function postAccountAction<T = unknown>(body: {
   action: string;
   payload?: Record<string, unknown>;
 }): Promise<AccountApiEnvelope<T>> {
-  const accessToken = await getCloudbaseAccessToken();
+  const accessToken = await getHttpAuthorizationToken();
   const res = await fetch(getAccountHttpUrl(), {
     method: 'POST',
     headers: {
@@ -39,16 +39,21 @@ export async function postAccountAction<T = unknown>(body: {
 }
 
 export function sendCode(email: string) {
-  return postAccountAction<{ email: string; expireAt?: number; debugCode?: string }>({
+  return postAccountAction<{
+    email: string;
+    verification_id: string;
+    expires_in?: number;
+    is_user?: boolean;
+  }>({
     action: 'send-code',
     payload: { email },
   });
 }
 
-export function verifyCode(email: string, code: string) {
+export function verifyCode(email: string, code: string, verificationId: string) {
   return postAccountAction<{ token: string; email: string }>({
     action: 'verify-code',
-    payload: { email, code },
+    payload: { email, code, verificationId },
   });
 }
 

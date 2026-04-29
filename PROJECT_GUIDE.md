@@ -153,7 +153,7 @@
    `@cloudbase/node-sdk` 的 `add/update` 直接传字段对象，不应使用 `data: {...}` 包裹。否则会出现“写入看似成功，但 where 条件查询不到”的问题。
 
 4. 调试模式与生产模式必须分离：  
-   调试阶段可返回 `debugCode`、保留 `debug-codes` action；生产前必须移除这两项并收紧权限。
+   生产云函数源码在仓库 `cloudfunctions/newworld/index.js`（已移除 `debugCode` 与 `debug-codes`，并对 `send-code` 做频控）。部署到 CloudBase 时请用该目录打包上传或逐段同步，并在控制台「保存并安装依赖」后发布。
 
 5. PowerShell 调用容易踩语法坑：  
    优先使用 `Invoke-RestMethod` 或 `curl.exe`（避免 `curl` 别名歧义）；不要把提示符 `>>` 粘贴进命令。
@@ -161,6 +161,13 @@
 6. CloudBase 控制台函数编辑经验：  
    修改云函数逻辑时，优先进入 `函数详情 -> 函数代码 -> index.js`。  
    新增或变更依赖后，优先使用“保存并安装依赖”，再发布并立即回归测试。
+
+### 7.1 安全收口（你方在控制台需手动确认）
+
+- **云函数代码**：与仓库 `cloudfunctions/newworld/` 保持一致并重新发布。  
+- **HTTP 路由**：生产环境建议重新开启「身份认证」，并确认前端请求已带 `Authorization: Bearer <CloudBase 访问令牌>`（当前前端 `authApi.ts` 已按此方式调用）。  
+- **安全域名**：继续只保留可信域名（含打包后桌面应用若走自定义协议需单独评估）。  
+- **数据库权限**：`email_codes` / `user_tokens` 等集合仅允许云函数访问，勿对前端直连开放写权限。
 
 ## 8. 账号系统一期速查表（文件-函数-按钮）
 
@@ -176,5 +183,13 @@
 | 接口地址/环境切换 | `src/features/account/config.ts` | `getAccountHttpUrl()` / `CLOUDBASE_ENV_ID` | 控制请求目标 |
 | 环境变量声明 | `src/vite-env.d.ts` | `VITE_CLOUDBASE_ENV_ID` / `VITE_ACCOUNT_HTTP_BASE` | 供 TS 校验与读取 |
 | 接口封装总入口 | `src/features/account/authApi.ts` | `postAccountAction()` | 统一 `POST /test` + Bearer |
+| 云函数（生产逻辑） | `cloudfunctions/newworld/index.js` | `exports.main` | 部署到 CloudBase 函数 `newworld` |
 
-一句话定位法：按钮问题看 `AccountLoginModal`；接口问题看 `authApi`；`ACTION_FORBIDDEN` 先查路由身份认证；拉取/推送问题看 `App.tsx` 快照导入导出函数。
+一句话定位法：按钮问题看 `AccountLoginModal`；接口问题看 `authApi`；`ACTION_FORBIDDEN` 先查路由身份认证；拉取/推送问题看 `App.tsx` 快照导入导出函数；云端逻辑以 `cloudfunctions/newworld/index.js` 为准。
+
+### 7.2 开启 HTTP 身份认证后出现 403
+
+1. 在 `.env` 中配置 **`VITE_CLOUDBASE_PUBLISHABLE_KEY`**（云开发控制台 → ApiKey / 身份令牌管理 → **客户端 Publishable Key**），并重启 `npm run dev`（`cloudbase.init` 只在首次加载时执行）。  
+2. 配置 **`VITE_CLOUDBASE_REGION`**（例如 `ap-shanghai`），须与环境地域一致。  
+3. 仍失败时打开浏览器开发者工具 → **网络**，查看失败的请求是否带请求头 **`Authorization: Bearer …`**；若 Bearer 为空或极短，多半是未配置 Publishable Key 或匿名登录未成功。  
+4. 若只有 **OPTIONS** 预检返回 403，多为网关/CORS 策略问题，需在 CloudBase HTTP 访问服务侧确认跨域与预检是否放行。
