@@ -15,6 +15,7 @@
    - HTTP 请求体常在 `event.body`（字符串），不能直接读取 `event.action`，需先做 JSON 解析。
    - `@cloudbase/node-sdk` 的 `add/update` 直接传字段对象，不使用 `data: {...}` 包裹。
    - 调试与生产必须分离：生产云函数以仓库 `cloudfunctions/newworld/index.js` 为准（无 `debugCode`、无 `debug-codes`）；控制台若曾保留调试版，发布前需对齐该文件。
+   - 当前邮箱验证码发码方案固定为 CloudBase 内置邮件服务（`/auth/v1/verification`），不是 21cn SMTP 直发；若要切回自定义 SMTP，必须先评审并同步更新文档与规则。
    - PowerShell 调用优先使用 `Invoke-RestMethod` 或 `curl.exe`，避免 `curl` 别名与 `>>` 粘贴问题。
    - 云函数改代码优先走 `函数详情 -> 函数代码 -> index.js`；新增依赖后优先使用“保存并安装依赖”，再发布并回归测试。
    - `ACTION_FORBIDDEN` 常见根因在 HTTP 路由身份认证层；开发联调阶段可先关闭路由身份认证以稳定推进，生产前再收紧。
