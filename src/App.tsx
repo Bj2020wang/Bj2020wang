@@ -40,6 +40,7 @@ interface PersistedData {
   viewType: ViewType;
   eventsByDate: Record<string, string[]>;
   notesByDate: Record<string, string>;
+  updatedAt?: number;
 }
 
 function isPersistedDataLike(value: unknown): value is PersistedData {
@@ -123,6 +124,7 @@ const createPersistedPayload = (
   viewType,
   eventsByDate: buildEventsByDate(events),
   notesByDate,
+  updatedAt: Date.now(),
 });
 
 export default function App() {

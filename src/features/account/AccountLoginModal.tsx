@@ -15,6 +15,17 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
+  const readUpdatedAt = (value: unknown): number | null => {
+    if (!value || typeof value !== 'object') return null;
+    const raw = (value as { updatedAt?: unknown }).updatedAt;
+    return typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
+  };
+
+  const formatTime = (ts: number | null): string => {
+    if (!ts) return '未知';
+    return new Date(ts).toLocaleString('zh-CN', { hour12: false });
+  };
+
   const handleSend = async () => {
     setError('');
     if (!email.trim()) {
@@ -55,7 +66,17 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
     }
     setBusy(true);
     try {
+      const localSnapshot = onPushSnapshot();
+      const localUpdatedAt = readUpdatedAt(localSnapshot);
       const res = await pullSnapshot(businessToken);
+      const cloudUpdatedAt = typeof res.data?.updatedAt === 'number' ? res.data.updatedAt : null;
+      const confirmed = window.confirm(
+        `确认用云端数据覆盖本地吗？\n云端更新时间：${formatTime(cloudUpdatedAt)}\n本地更新时间：${formatTime(localUpdatedAt)}`
+      );
+      if (!confirmed) {
+        setHint('已取消拉取，保留本地数据');
+        return;
+      }
       onPullSnapshot(res.data?.snapshot ?? null);
       setHint('已从云端拉取并应用到本地');
     } catch (e) {
