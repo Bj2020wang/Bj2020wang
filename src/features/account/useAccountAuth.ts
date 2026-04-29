@@ -66,6 +66,21 @@ export function useAccountAuth() {
     }
   }, [persistBusinessToken]);
 
+  const withAuthGuard = useCallback(
+    async <T>(run: () => Promise<T>): Promise<T> => {
+      try {
+        return await run();
+      } catch (e) {
+        if (e instanceof api.AccountAuthExpiredError) {
+          persistBusinessToken(null);
+          setHint('登录已失效，请重新验证');
+        }
+        throw e;
+      }
+    },
+    [persistBusinessToken]
+  );
+
   return {
     businessToken,
     hint,
@@ -74,7 +89,8 @@ export function useAccountAuth() {
     verify,
     logout,
     persistBusinessToken,
-    pullSnapshot: api.pullSnapshot,
-    pushSnapshot: api.pushSnapshot,
+    pullSnapshot: (token: string) => withAuthGuard(() => api.pullSnapshot(token)),
+    pushSnapshot: (token: string, snapshot: unknown) =>
+      withAuthGuard(() => api.pushSnapshot(token, snapshot)),
   };
 }

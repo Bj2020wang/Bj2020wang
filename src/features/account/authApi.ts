@@ -7,6 +7,13 @@ export type AccountApiEnvelope<T = unknown> = {
   data?: T;
 };
 
+export class AccountAuthExpiredError extends Error {
+  constructor(message = '登录已失效，请重新验证') {
+    super(message);
+    this.name = 'AccountAuthExpiredError';
+  }
+}
+
 export async function postAccountAction<T = unknown>(body: {
   action: string;
   payload?: Record<string, unknown>;
@@ -30,9 +37,15 @@ export async function postAccountAction<T = unknown>(body: {
   }
 
   if (!res.ok) {
+    if (res.status === 401) {
+      throw new AccountAuthExpiredError(json.message || '登录已失效，请重新验证');
+    }
     throw new Error(json.message || `请求失败 HTTP ${res.status}`);
   }
   if (json.code !== 0) {
+    if (json.code === 401) {
+      throw new AccountAuthExpiredError(json.message || '登录已失效，请重新验证');
+    }
     throw new Error(json.message || '接口返回错误');
   }
   return json;
