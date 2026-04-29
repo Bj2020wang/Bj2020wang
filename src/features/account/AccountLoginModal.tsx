@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
 import { useAccountAuth } from './useAccountAuth';
+import type { SnapshotHistoryItem } from './authApi';
 
 interface AccountLoginModalProps {
   onClose: () => void;
@@ -9,11 +10,23 @@ interface AccountLoginModalProps {
 }
 
 export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnapshot }: AccountLoginModalProps) {
-  const { businessToken, hint, sendCode, verify, logout, setHint, pullSnapshot, pushSnapshot } = useAccountAuth();
+  const {
+    businessToken,
+    hint,
+    sendCode,
+    verify,
+    logout,
+    setHint,
+    pullSnapshot,
+    pushSnapshot,
+    listSnapshotHistory,
+    restoreSnapshotHistory,
+  } = useAccountAuth();
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [historyItems, setHistoryItems] = useState<SnapshotHistoryItem[]>([]);
 
   const readUpdatedAt = (value: unknown): number | null => {
     if (!value || typeof value !== 'object') return null;
@@ -109,6 +122,53 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
       setHint('已将本地数据推送到云端');
     } catch (e) {
       setError(e instanceof Error ? e.message : '推送失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleLoadHistory = async () => {
+    setError('');
+    if (!businessToken) {
+      setError('请先完成账号登录');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await listSnapshotHistory(businessToken);
+      setHistoryItems(res.data?.items ?? []);
+      setHint((res.data?.items?.length ?? 0) > 0 ? '已加载云端历史快照' : '暂无历史快照');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '加载历史失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRestoreHistory = async (item: SnapshotHistoryItem) => {
+    setError('');
+    if (!businessToken) {
+      setError('请先完成账号登录');
+      return;
+    }
+    setBusy(true);
+    try {
+      const localSnapshot = onPushSnapshot();
+      const localUpdatedAt = readUpdatedAt(localSnapshot);
+      const confirmed = window.confirm(
+        `确认恢复这条历史快照到本地吗？\n历史备份时间：${formatTime(item.backupAt ?? null)}\n该快照原更新时间：${formatTime(
+          item.updatedAt ?? null
+        )}\n本地更新时间：${formatTime(localUpdatedAt)}`
+      );
+      if (!confirmed) {
+        setHint('已取消恢复历史快照');
+        return;
+      }
+      const res = await restoreSnapshotHistory(businessToken, item.id);
+      onPullSnapshot(res.data?.snapshot ?? null);
+      setHint('已恢复历史快照到本地（如需上云请再点推送云端）');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '恢复历史失败');
     } finally {
       setBusy(false);
     }
@@ -216,6 +276,14 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
                 >
                   推送云端
                 </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={handleLoadHistory}
+                  className="rounded-lg border border-[#3E3E48] px-4 py-2 text-sm text-[#9CA3AF] hover:bg-[#2A2A32] disabled:opacity-50"
+                >
+                  查看历史
+                </button>
               </>
             ) : null}
             {businessToken ? (
@@ -233,6 +301,30 @@ export default function AccountLoginModal({ onClose, onPullSnapshot, onPushSnaps
               </button>
             ) : null}
           </div>
+
+          {businessToken && historyItems.length > 0 ? (
+            <div className="rounded-lg border border-[#2E2E36] bg-[#1A1A1F] p-3">
+              <p className="mb-2 text-xs font-medium text-[#9CA3AF]">云端历史快照（最近 3 条）</p>
+              <div className="space-y-2">
+                {historyItems.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between gap-2 rounded-md bg-[#212128] px-2 py-2">
+                    <div className="min-w-0 text-xs text-[#9CA3AF]">
+                      <p>备份时间：{formatTime(item.backupAt ?? null)}</p>
+                      <p>快照原时间：{formatTime(item.updatedAt ?? null)}</p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => handleRestoreHistory(item)}
+                      className="shrink-0 rounded-md border border-[#3E3E48] px-3 py-1 text-xs text-[#9CA3AF] hover:bg-[#2A2A32] disabled:opacity-50"
+                    >
+                      恢复
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

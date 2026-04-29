@@ -92,5 +92,8 @@ export function useAccountAuth() {
     pullSnapshot: (token: string) => withAuthGuard(() => api.pullSnapshot(token)),
     pushSnapshot: (token: string, snapshot: unknown) =>
       withAuthGuard(() => api.pushSnapshot(token, snapshot)),
+    listSnapshotHistory: (token: string) => withAuthGuard(() => api.listSnapshotHistory(token)),
+    restoreSnapshotHistory: (token: string, historyId: string) =>
+      withAuthGuard(() => api.restoreSnapshotHistory(token, historyId)),
   };
 }

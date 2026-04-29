@@ -14,6 +14,12 @@ export class AccountAuthExpiredError extends Error {
   }
 }
 
+export type SnapshotHistoryItem = {
+  id: string;
+  backupAt?: number | null;
+  updatedAt?: number | null;
+};
+
 export async function postAccountAction<T = unknown>(body: {
   action: string;
   payload?: Record<string, unknown>;
@@ -81,5 +87,24 @@ export function pushSnapshot(token: string, snapshot: unknown) {
   return postAccountAction<{ email: string; updatedAt: number }>({
     action: 'push',
     payload: { token, snapshot },
+  });
+}
+
+export function listSnapshotHistory(token: string) {
+  return postAccountAction<{ email: string; items: SnapshotHistoryItem[] }>({
+    action: 'list-history',
+    payload: { token },
+  });
+}
+
+export function restoreSnapshotHistory(token: string, historyId: string) {
+  return postAccountAction<{
+    email: string;
+    snapshot: unknown;
+    backupAt?: number | null;
+    updatedAt?: number | null;
+  }>({
+    action: 'restore-history',
+    payload: { token, historyId },
   });
 }

@@ -14,6 +14,7 @@
 const https = require('https');
 const cloudbase = require('@cloudbase/node-sdk');
 const crypto = require('crypto');
+const SNAPSHOT_HISTORY_LIMIT = 3;
 
 const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
 const db = app.database();
@@ -121,6 +122,11 @@ async function removeTokensForEmail(email) {
   await db.collection('user_tokens').where({ email }).remove();
 }
 
+function isCollectionMissingError(err) {
+  var msg = err && err.message ? String(err.message) : '';
+  return msg.includes('Db or Table not exist') || msg.includes('collection not exists');
+}
+
 exports.main = async function (event) {
   const req = parseRequest(event);
   if (req === null) {
@@ -144,6 +150,10 @@ exports.main = async function (event) {
         return await handlePull(payload);
       case 'push':
         return await handlePush(payload);
+      case 'list-history':
+        return await handleListHistory(payload);
+      case 'restore-history':
+        return await handleRestoreHistory(payload);
       default:
         return fail(404, 404, 'unknown action');
     }
@@ -260,6 +270,29 @@ async function resolveEmailByToken(token) {
   return data[0].email || null;
 }
 
+async function trimSnapshotHistory(email) {
+  var historyRes;
+  try {
+    historyRes = await db
+      .collection('user_snapshot_histories')
+      .where({ email: email })
+      .orderBy('backupAt', 'desc')
+      .limit(100)
+      .get();
+  } catch (err) {
+    if (isCollectionMissingError(err)) return;
+    throw err;
+  }
+  var list = historyRes.data || [];
+  if (list.length <= SNAPSHOT_HISTORY_LIMIT) return;
+  var stale = list.slice(SNAPSHOT_HISTORY_LIMIT);
+  await Promise.all(
+    stale.map(function (item) {
+      return db.collection('user_snapshot_histories').doc(item._id).remove();
+    })
+  );
+}
+
 async function handlePull(payload) {
   var email = await resolveEmailByToken(payload.token);
   if (!email) {
@@ -290,6 +323,19 @@ async function handlePush(payload) {
 
   var existing = await db.collection('user_snapshots').where({ email: email }).limit(1).get();
   if (existing.data && existing.data[0]) {
+    var previous = existing.data[0];
+    try {
+      await db.collection('user_snapshot_histories').add({
+        email: email,
+        snapshot: previous.snapshot,
+        updatedAt: typeof previous.updatedAt === 'number' ? previous.updatedAt : null,
+        backupAt: updatedAt,
+      });
+      await trimSnapshotHistory(email);
+    } catch (err) {
+      // 历史集合未建时不阻断主流程，推送照常成功
+      if (!isCollectionMissingError(err)) throw err;
+    }
     await db.collection('user_snapshots').doc(existing.data[0]._id).update({
       snapshot: snapshot,
       updatedAt: updatedAt,
@@ -303,4 +349,68 @@ async function handlePush(payload) {
   }
 
   return ok({ email: email, updatedAt: updatedAt });
+}
+
+async function handleListHistory(payload) {
+  var email = await resolveEmailByToken(payload.token);
+  if (!email) {
+    return fail(401, 401, '登录已失效，请重新验证');
+  }
+
+  var res;
+  try {
+    res = await db
+      .collection('user_snapshot_histories')
+      .where({ email: email })
+      .orderBy('backupAt', 'desc')
+      .limit(SNAPSHOT_HISTORY_LIMIT)
+      .get();
+  } catch (err) {
+    if (isCollectionMissingError(err)) {
+      return ok({ email: email, items: [] });
+    }
+    throw err;
+  }
+  var items = (res.data || []).map(function (item) {
+    return {
+      id: item._id,
+      backupAt: typeof item.backupAt === 'number' ? item.backupAt : null,
+      updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : null,
+    };
+  });
+
+  return ok({ email: email, items: items });
+}
+
+async function handleRestoreHistory(payload) {
+  var email = await resolveEmailByToken(payload.token);
+  if (!email) {
+    return fail(401, 401, '登录已失效，请重新验证');
+  }
+
+  var historyId = String(payload.historyId || '').trim();
+  if (!historyId) {
+    return fail(400, 400, 'historyId is required');
+  }
+
+  var res;
+  try {
+    res = await db.collection('user_snapshot_histories').doc(historyId).get();
+  } catch (err) {
+    if (isCollectionMissingError(err)) {
+      return fail(404, 404, '历史快照集合不存在，请先推送一次创建历史');
+    }
+    throw err;
+  }
+  var item = res.data;
+  if (!item || item.email !== email) {
+    return fail(404, 404, '历史快照不存在');
+  }
+
+  return ok({
+    email: email,
+    snapshot: item.snapshot != null ? item.snapshot : null,
+    backupAt: typeof item.backupAt === 'number' ? item.backupAt : null,
+    updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : null,
+  });
 }
