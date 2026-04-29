@@ -6,6 +6,7 @@ import type { SnapshotHistoryItem } from './authApi';
 
 const AUTO_PUSH_IDLE_MS = 30_000;
 const AUTO_PUSH_INTERVAL_MS = 60_000;
+const AUTO_SYNC_COOLDOWN_MS = 15_000;
 const AUTO_PUSH_ENABLED_KEY = 'todo-calendar-auto-push-enabled';
 const AUTO_PUSH_LAST_AT_KEY = 'todo-calendar-auto-push-last-at';
 const FIRST_PULL_DONE_KEY = 'todo-calendar-first-pull-done';
@@ -78,6 +79,7 @@ export default function AccountLoginModal({
   });
   const lastActivityAtRef = useRef(Date.now());
   const lastAutoPushAtRef = useRef(0);
+  const lastSyncActionAtRef = useRef(0);
   const lastReportedRuntimeRef = useRef<string>('');
 
   const reportRuntime = (status: '未登录' | '同步中' | '空闲') => {
@@ -117,7 +119,7 @@ export default function AccountLoginModal({
   ): Promise<{
     localUpdatedAt: number | null;
     cloudUpdatedAt: number | null;
-    localIsNewer: boolean;
+    localHasChanges: boolean;
     cloudHasNewerVersion: boolean;
     cloudVersion: number;
   }> => {
@@ -131,29 +133,27 @@ export default function AccountLoginModal({
     const localComparable = toComparableString(localSnapshot);
     const cloudComparable = toComparableString(cloudSnapshot);
     const snapshotDifferent = localComparable !== '' && cloudComparable !== '' && localComparable !== cloudComparable;
-    const localIsNewer =
-      !cloudHasNewerVersion &&
-      (snapshotDifferent || (!!localUpdatedAt && (!cloudUpdatedAt || localUpdatedAt > cloudUpdatedAt)));
-    setHasPendingSync(localIsNewer);
+    const localHasChanges = snapshotDifferent || (!!localUpdatedAt && (!cloudUpdatedAt || localUpdatedAt > cloudUpdatedAt));
+    setHasPendingSync(localHasChanges && !cloudHasNewerVersion);
 
     if (!localUpdatedAt && !cloudUpdatedAt) {
       setSyncStatus('暂无可比较的同步时间');
-      return { localUpdatedAt, cloudUpdatedAt, localIsNewer, cloudHasNewerVersion, cloudVersion };
+      return { localUpdatedAt, cloudUpdatedAt, localHasChanges, cloudHasNewerVersion, cloudVersion };
     }
     if (cloudHasNewerVersion) {
       setSyncStatus('检测到云端有更新，建议先拉取云端');
-      return { localUpdatedAt, cloudUpdatedAt, localIsNewer, cloudHasNewerVersion, cloudVersion };
+      return { localUpdatedAt, cloudUpdatedAt, localHasChanges, cloudHasNewerVersion, cloudVersion };
     }
     if (cloudUpdatedAt && (!localUpdatedAt || cloudUpdatedAt > localUpdatedAt)) {
       setSyncStatus('检测到云端有更新，建议先拉取云端');
-      return { localUpdatedAt, cloudUpdatedAt, localIsNewer, cloudHasNewerVersion, cloudVersion };
+      return { localUpdatedAt, cloudUpdatedAt, localHasChanges, cloudHasNewerVersion, cloudVersion };
     }
-    if (localIsNewer) {
+    if (localHasChanges) {
       setSyncStatus('检测到本地有未推送更新，建议推送云端');
-      return { localUpdatedAt, cloudUpdatedAt, localIsNewer, cloudHasNewerVersion, cloudVersion };
+      return { localUpdatedAt, cloudUpdatedAt, localHasChanges, cloudHasNewerVersion, cloudVersion };
     }
     setSyncStatus('本地与云端已同步');
-    return { localUpdatedAt, cloudUpdatedAt, localIsNewer, cloudHasNewerVersion, cloudVersion };
+    return { localUpdatedAt, cloudUpdatedAt, localHasChanges, cloudHasNewerVersion, cloudVersion };
   };
 
   useEffect(() => {
@@ -170,37 +170,67 @@ export default function AccountLoginModal({
       reportRuntime('同步中');
       try {
         const summary = await checkSyncStatus(businessToken);
-        if (summary.cloudHasNewerVersion) {
-          if (summary.localIsNewer) {
-            setSyncStatus('检测到云端更新，但本地有未同步改动；请先手动处理，避免覆盖');
-          } else {
-            setSyncStatus('检测到云端有更新，建议手动拉取云端');
-          }
-          reportRuntime('空闲');
-          return;
-        }
-        if (!autoPushEnabled || !hasPulledOnce || busy || summary.cloudHasNewerVersion || !summary.localIsNewer) {
+        if (!autoPushEnabled || !hasPulledOnce || busy) {
           reportRuntime('空闲');
           return;
         }
         const now = Date.now();
         const isIdle = now - lastActivityAtRef.current >= AUTO_PUSH_IDLE_MS;
         const intervalOk = now - lastAutoPushAtRef.current >= AUTO_PUSH_INTERVAL_MS;
-        if (!isIdle || !intervalOk) {
+        const cooldownOk = now - lastSyncActionAtRef.current >= AUTO_SYNC_COOLDOWN_MS;
+        if (!isIdle || !intervalOk || !cooldownOk) {
           reportRuntime('空闲');
           return;
         }
 
-        const localSnapshot = onPushSnapshot();
-        await pushSnapshot(businessToken, localSnapshot);
-        const pushedAt = Date.now();
-        lastAutoPushAtRef.current = pushedAt;
-        setLastAutoPushAt(pushedAt);
-        window.localStorage.setItem(AUTO_PUSH_LAST_AT_KEY, String(pushedAt));
-        setLastPushAt(pushedAt);
-        window.localStorage.setItem(ACCOUNT_LAST_PUSH_AT_KEY, String(pushedAt));
-        setHasPendingSync(false);
-        setSyncStatus('空闲自动推送完成');
+        if (summary.cloudHasNewerVersion && summary.localHasChanges) {
+          const pullRes = await pullSnapshot(businessToken);
+          onPullSnapshot(pullRes.data?.snapshot ?? null);
+          const pulledAt = Date.now();
+          setLastPullAt(pulledAt);
+          window.localStorage.setItem(ACCOUNT_LAST_PULL_AT_KEY, String(pulledAt));
+
+          const mergedSnapshot = onPushSnapshot();
+          await pushSnapshot(businessToken, mergedSnapshot);
+          const pushedAt = Date.now();
+          lastAutoPushAtRef.current = pushedAt;
+          lastSyncActionAtRef.current = pushedAt;
+          setLastAutoPushAt(pushedAt);
+          window.localStorage.setItem(AUTO_PUSH_LAST_AT_KEY, String(pushedAt));
+          setLastPushAt(pushedAt);
+          window.localStorage.setItem(ACCOUNT_LAST_PUSH_AT_KEY, String(pushedAt));
+          setHasPendingSync(false);
+          setSyncStatus('已自动执行双向同步（先拉后推）');
+          reportRuntime('空闲');
+          return;
+        }
+
+        if (summary.cloudHasNewerVersion) {
+          const pullRes = await pullSnapshot(businessToken);
+          onPullSnapshot(pullRes.data?.snapshot ?? null);
+          const pulledAt = Date.now();
+          lastSyncActionAtRef.current = pulledAt;
+          setLastPullAt(pulledAt);
+          window.localStorage.setItem(ACCOUNT_LAST_PULL_AT_KEY, String(pulledAt));
+          setHasPendingSync(false);
+          setSyncStatus('已自动拉取云端最新数据');
+          reportRuntime('空闲');
+          return;
+        }
+
+        if (summary.localHasChanges) {
+          const localSnapshot = onPushSnapshot();
+          await pushSnapshot(businessToken, localSnapshot);
+          const pushedAt = Date.now();
+          lastAutoPushAtRef.current = pushedAt;
+          lastSyncActionAtRef.current = pushedAt;
+          setLastAutoPushAt(pushedAt);
+          window.localStorage.setItem(AUTO_PUSH_LAST_AT_KEY, String(pushedAt));
+          setLastPushAt(pushedAt);
+          window.localStorage.setItem(ACCOUNT_LAST_PUSH_AT_KEY, String(pushedAt));
+          setHasPendingSync(false);
+          setSyncStatus('空闲自动推送完成');
+        }
         reportRuntime('空闲');
       } catch (e) {
         if (e instanceof AccountSyncConflictError) {
