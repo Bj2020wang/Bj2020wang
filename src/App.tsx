@@ -107,18 +107,24 @@ const loadPersistedData = (): PersistedData | null => {
 };
 
 const categoryColorMap: Record<TodoCategory, string> = {
-  work: '#3B82F6',
-  life: '#EC4899',
-  study: '#8B5CF6',
-  health: '#10B981',
+  work: '#10B981',
+  life: '#8B5CF6',
+  study: '#F59E0B',
+  health: '#EC4899',
 };
 
 const inferCategoryFromColor = (color: string): TodoCategory => {
-  if (color === '#10B981' || color === '#06B6D4') return 'health';
-  if (color === '#8B5CF6') return 'study';
-  if (color === '#EC4899') return 'life';
+  if (color === '#10B981' || color === '#06B6D4') return 'work';
+  if (color === '#8B5CF6') return 'life';
+  if (color === '#EC4899') return 'health';
   return 'work';
 };
+
+const normalizeTodoColorsByCategory = (todos: TodoItem[]): TodoItem[] =>
+  todos.map((todo) => {
+    const targetColor = categoryColorMap[todo.category];
+    return todo.color === targetColor ? todo : { ...todo, color: targetColor };
+  });
 
 const createPersistedPayload = (
   todos: TodoItem[],
@@ -368,7 +374,9 @@ export default function App() {
     persisted?.currentDate ? new Date(persisted.currentDate) : new Date(2024, 9, 15)
   ); // Oct 15, 2024
   const [viewType, setViewType] = useState<ViewType>(persisted?.viewType ?? 'month');
-  const [todos, setTodos] = useState<TodoItem[]>(persisted?.todos ?? defaultTodos);
+  const [todos, setTodos] = useState<TodoItem[]>(() =>
+    normalizeTodoColorsByCategory(persisted?.todos ?? defaultTodos)
+  );
   const [todoTombstones, setTodoTombstones] = useState<Record<string, number>>(persisted?.todoTombstones ?? {});
   const [events, setEvents] = useState<CalendarEvent[]>(persisted?.events ?? defaultEvents);
   const [eventTombstones, setEventTombstones] = useState<Record<string, number>>(persisted?.eventTombstones ?? {});
@@ -752,7 +760,7 @@ export default function App() {
         return;
       }
 
-      setTodos(parsed.todos);
+      setTodos(normalizeTodoColorsByCategory(parsed.todos));
       setTodoTombstones(parsed.todoTombstones ?? {});
       setEvents(parsed.events);
       setEventTombstones(parsed.eventTombstones ?? {});
@@ -959,7 +967,7 @@ export default function App() {
       snapshot.noteMetaByDate ?? {},
       snapshot.noteTombstonesByDate ?? {}
     );
-    setTodos(merged.todos);
+    setTodos(normalizeTodoColorsByCategory(merged.todos));
     setTodoTombstones(merged.tombstones);
     if (merged.fieldMergeCount > 0 || merged.conflictCount > 0) {
       const parts: string[] = [];
