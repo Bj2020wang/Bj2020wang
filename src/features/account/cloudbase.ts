@@ -1,5 +1,6 @@
 import cloudbase from '@cloudbase/js-sdk';
 import { CLOUDBASE_ENV_ID, CLOUDBASE_PUBLISHABLE_KEY, CLOUDBASE_REGION } from './config';
+import { throwIfTauriFetchLikelySecurityDomain } from './desktopFetchHint';
 
 type CloudbaseApp = ReturnType<typeof cloudbase.init>;
 
@@ -42,11 +43,16 @@ function unwrapAccessToken(raw: unknown): string | null {
 
 /** 情况 B：先匿名登录，保证函数权限 auth != null */
 export async function ensureAnonymousSignIn(): Promise<void> {
-  const cb = getCloudbaseApp();
-  const auth = cb.auth();
-  const loginState = await auth.getLoginState();
-  if (loginState) return;
-  await auth.signInAnonymously();
+  try {
+    const cb = getCloudbaseApp();
+    const auth = cb.auth();
+    const loginState = await auth.getLoginState();
+    if (loginState) return;
+    await auth.signInAnonymously();
+  } catch (e) {
+    throwIfTauriFetchLikelySecurityDomain(e);
+    throw e;
+  }
 }
 
 /** 用于 HTTP 网关 Authorization: Bearer … */

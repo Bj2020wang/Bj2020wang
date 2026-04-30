@@ -42,11 +42,13 @@ interface PersistedData {
   todos: TodoItem[];
   todoTombstones?: Record<string, number>;
   events: CalendarEvent[];
+  eventTombstones?: Record<string, number>;
   currentDate: string;
   viewType: ViewType;
   eventsByDate: Record<string, string[]>;
   notesByDate: Record<string, string>;
   noteMetaByDate?: Record<string, number>;
+  noteTombstonesByDate?: Record<string, number>;
   updatedAt?: number;
 }
 
@@ -122,19 +124,23 @@ const createPersistedPayload = (
   todos: TodoItem[],
   todoTombstones: Record<string, number>,
   events: CalendarEvent[],
+  eventTombstones: Record<string, number>,
   currentDate: Date,
   viewType: ViewType,
   notesByDate: Record<string, string>,
-  noteMetaByDate: Record<string, number>
+  noteMetaByDate: Record<string, number>,
+  noteTombstonesByDate: Record<string, number>
 ): PersistedData => ({
   todos,
   todoTombstones,
   events,
+  eventTombstones,
   currentDate: currentDate.toISOString(),
   viewType,
   eventsByDate: buildEventsByDate(events),
   notesByDate,
   noteMetaByDate,
+  noteTombstonesByDate,
   updatedAt: Date.now(),
 });
 
@@ -190,6 +196,8 @@ const mergeTodoRecords = (
     const localTodo = localMap.get(id);
     const cloudTodo = cloudMap.get(id);
     if (!localTodo && !cloudTodo) return;
+    const hasTombstone = id in mergedTombstones;
+    if (hasTombstone) return;
     let todo = localTodo ?? cloudTodo!;
 
     if (localTodo && cloudTodo) {
@@ -224,8 +232,6 @@ const mergeTodoRecords = (
       todo = mergedTodo;
     }
 
-    const deletedAt = mergedTombstones[id] ?? 0;
-    if (deletedAt >= readTodoUpdatedAt(todo)) return;
     mergedTodos.push(todo);
   });
 
@@ -234,8 +240,15 @@ const mergeTodoRecords = (
 
 const mergeEventRecords = (
   localEvents: CalendarEvent[],
-  cloudEvents: CalendarEvent[]
-): { events: CalendarEvent[]; fieldMergeCount: number; conflictCount: number } => {
+  localTombstones: Record<string, number>,
+  cloudEvents: CalendarEvent[],
+  cloudTombstones: Record<string, number>
+): { events: CalendarEvent[]; tombstones: Record<string, number>; fieldMergeCount: number; conflictCount: number } => {
+  const mergedTombstones: Record<string, number> = { ...localTombstones };
+  Object.entries(cloudTombstones).forEach(([id, ts]) => {
+    if (!Number.isFinite(ts)) return;
+    mergedTombstones[id] = Math.max(mergedTombstones[id] ?? 0, ts);
+  });
   let fieldMergeCount = 0;
   let conflictCount = 0;
   const localMap = new Map(localEvents.map((event) => [event.id, event]));
@@ -247,6 +260,7 @@ const mergeEventRecords = (
     const localEvent = localMap.get(id);
     const cloudEvent = cloudMap.get(id);
     if (!localEvent && !cloudEvent) return;
+    if (id in mergedTombstones) return;
     if (!localEvent || !cloudEvent) {
       mergedEvents.push(localEvent ?? cloudEvent!);
       return;
@@ -282,40 +296,68 @@ const mergeEventRecords = (
     mergedEvents.push(mergedEvent);
   });
 
-  return { events: mergedEvents, fieldMergeCount, conflictCount };
+  return { events: mergedEvents, tombstones: mergedTombstones, fieldMergeCount, conflictCount };
 };
 
 const mergeNoteRecords = (
   localNotes: Record<string, string>,
   localMeta: Record<string, number>,
+  localTombstones: Record<string, number>,
   cloudNotes: Record<string, string>,
-  cloudMeta: Record<string, number>
-): { notesByDate: Record<string, string>; noteMetaByDate: Record<string, number>; mergeCount: number } => {
+  cloudMeta: Record<string, number>,
+  cloudTombstones: Record<string, number>
+): {
+  notesByDate: Record<string, string>;
+  noteMetaByDate: Record<string, number>;
+  noteTombstonesByDate: Record<string, number>;
+  mergeCount: number;
+} => {
   const mergedNotes: Record<string, string> = {};
   const mergedMeta: Record<string, number> = {};
+  const mergedTombstones: Record<string, number> = {};
   let mergeCount = 0;
   const allKeys = new Set<string>([
     ...Object.keys(localNotes),
     ...Object.keys(cloudNotes),
     ...Object.keys(localMeta),
     ...Object.keys(cloudMeta),
+    ...Object.keys(localTombstones),
+    ...Object.keys(cloudTombstones),
   ]);
 
   allKeys.forEach((key) => {
     const localAt = Number.isFinite(localMeta[key]) ? localMeta[key] : 0;
     const cloudAt = Number.isFinite(cloudMeta[key]) ? cloudMeta[key] : 0;
-    const useCloud = cloudAt > localAt;
+    const localDelAt = Number.isFinite(localTombstones[key]) ? localTombstones[key] : 0;
+    const cloudDelAt = Number.isFinite(cloudTombstones[key]) ? cloudTombstones[key] : 0;
+    const mergedDelAt = Math.max(localDelAt, cloudDelAt);
+    const cloudText = cloudNotes[key] ?? '';
+    const localText = localNotes[key] ?? '';
+    const useCloud = cloudAt >= localAt;
     const chosenAt = useCloud ? cloudAt : localAt;
-    const chosenText = useCloud ? (cloudNotes[key] ?? '') : (localNotes[key] ?? '');
+    const chosenText = useCloud ? cloudText : localText;
 
     if (localAt > 0 && cloudAt > 0 && localAt !== cloudAt) {
       mergeCount += 1;
     }
-    if (chosenAt > 0) mergedMeta[key] = chosenAt;
-    if (chosenText.trim()) mergedNotes[key] = chosenText;
+    if (chosenAt > 0) {
+      mergedMeta[key] = chosenAt;
+    }
+    if (mergedDelAt > 0) {
+      mergedTombstones[key] = mergedDelAt;
+    }
+    // 删除墓碑时间新于（或等于）文本更新时间时，文本必须保持空，防止复活。
+    if (chosenText.trim() && mergedDelAt < chosenAt) {
+      mergedNotes[key] = chosenText;
+    }
   });
 
-  return { notesByDate: mergedNotes, noteMetaByDate: mergedMeta, mergeCount };
+  return {
+    notesByDate: mergedNotes,
+    noteMetaByDate: mergedMeta,
+    noteTombstonesByDate: mergedTombstones,
+    mergeCount,
+  };
 };
 
 export default function App() {
@@ -329,8 +371,12 @@ export default function App() {
   const [todos, setTodos] = useState<TodoItem[]>(persisted?.todos ?? defaultTodos);
   const [todoTombstones, setTodoTombstones] = useState<Record<string, number>>(persisted?.todoTombstones ?? {});
   const [events, setEvents] = useState<CalendarEvent[]>(persisted?.events ?? defaultEvents);
+  const [eventTombstones, setEventTombstones] = useState<Record<string, number>>(persisted?.eventTombstones ?? {});
   const [notesByDate, setNotesByDate] = useState<Record<string, string>>(persisted?.notesByDate ?? {});
   const [noteMetaByDate, setNoteMetaByDate] = useState<Record<string, number>>(persisted?.noteMetaByDate ?? {});
+  const [noteTombstonesByDate, setNoteTombstonesByDate] = useState<Record<string, number>>(
+    persisted?.noteTombstonesByDate ?? {}
+  );
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const [showAccountLogin, setShowAccountLogin] = useState(false);
@@ -356,9 +402,19 @@ export default function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const payload = createPersistedPayload(todos, todoTombstones, events, currentDate, viewType, notesByDate, noteMetaByDate);
+    const payload = createPersistedPayload(
+      todos,
+      todoTombstones,
+      events,
+      eventTombstones,
+      currentDate,
+      viewType,
+      notesByDate,
+      noteMetaByDate,
+      noteTombstonesByDate
+    );
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  }, [todos, todoTombstones, events, currentDate, viewType, notesByDate, noteMetaByDate]);
+  }, [todos, todoTombstones, events, eventTombstones, currentDate, viewType, notesByDate, noteMetaByDate, noteTombstonesByDate]);
 
   /** 已登录且完成过首次拉取后：本地数据变更则防抖推送到云端（与手动「推送云端」同接口） */
   useEffect(() => {
@@ -375,7 +431,17 @@ export default function App() {
     if (autoPushTimerRef.current) clearTimeout(autoPushTimerRef.current);
     autoPushTimerRef.current = setTimeout(() => {
       autoPushTimerRef.current = null;
-      const snap = createPersistedPayload(todos, todoTombstones, events, currentDate, viewType, notesByDate, noteMetaByDate);
+      const snap = createPersistedPayload(
+        todos,
+        todoTombstones,
+        events,
+        eventTombstones,
+        currentDate,
+        viewType,
+        notesByDate,
+        noteMetaByDate,
+        noteTombstonesByDate
+      );
       void pushSnapshot(businessToken, snap).catch((e) => {
         if (e instanceof AccountSyncConflictError) {
           console.warn('[auto-push] 云端版本已变，请先拉取或稍后重试', e);
@@ -395,10 +461,12 @@ export default function App() {
     todos,
     todoTombstones,
     events,
+    eventTombstones,
     currentDate,
     viewType,
     notesByDate,
     noteMetaByDate,
+    noteTombstonesByDate,
     businessToken,
     pushSnapshot,
   ]);
@@ -610,8 +678,23 @@ export default function App() {
   }, []);
 
   const handleDeleteTodo = useCallback((todoId: string) => {
+    const localTodo = todosRef.current.find((todo) => todo.id === todoId);
+    const localTodoUpdatedAt = localTodo ? readTodoUpdatedAt(localTodo) : 0;
+    const tombstoneAt = Math.max(Date.now(), localTodoUpdatedAt + 1);
+    const deletedEventIds = eventsRef.current
+      .filter((event) => event.sourceTodoId === todoId)
+      .map((event) => event.id);
     setTodos((prev) => prev.filter((todo) => todo.id !== todoId));
-    setTodoTombstones((prev) => ({ ...prev, [todoId]: Date.now() }));
+    setTodoTombstones((prev) => ({ ...prev, [todoId]: tombstoneAt }));
+    if (deletedEventIds.length > 0) {
+      setEventTombstones((prev) => {
+        const next = { ...prev };
+        deletedEventIds.forEach((eventId) => {
+          next[eventId] = tombstoneAt;
+        });
+        return next;
+      });
+    }
     setEvents((prev) => prev.filter((event) => event.sourceTodoId !== todoId));
   }, []);
 
@@ -626,14 +709,26 @@ export default function App() {
     setTodos(defaultTodos);
     setTodoTombstones({});
     setEvents(defaultEvents);
+    setEventTombstones({});
     setNotesByDate({});
     setNoteMetaByDate({});
+    setNoteTombstonesByDate({});
     setShowMonthPicker(false);
   }, []);
 
   const handleExportData = useCallback(() => {
     if (typeof window === 'undefined') return;
-    const payload = createPersistedPayload(todos, todoTombstones, events, currentDate, viewType, notesByDate, noteMetaByDate);
+    const payload = createPersistedPayload(
+      todos,
+      todoTombstones,
+      events,
+      eventTombstones,
+      currentDate,
+      viewType,
+      notesByDate,
+      noteMetaByDate,
+      noteTombstonesByDate
+    );
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = window.URL.createObjectURL(blob);
     const anchor = document.createElement('a');
@@ -641,7 +736,7 @@ export default function App() {
     anchor.download = `todo-calendar-backup-${toDateKey(new Date())}.json`;
     anchor.click();
     window.URL.revokeObjectURL(url);
-  }, [todos, todoTombstones, events, currentDate, viewType, notesByDate, noteMetaByDate]);
+  }, [todos, todoTombstones, events, eventTombstones, currentDate, viewType, notesByDate, noteMetaByDate, noteTombstonesByDate]);
 
   const handleImportData = useCallback(async (file: File) => {
     try {
@@ -660,10 +755,12 @@ export default function App() {
       setTodos(parsed.todos);
       setTodoTombstones(parsed.todoTombstones ?? {});
       setEvents(parsed.events);
+      setEventTombstones(parsed.eventTombstones ?? {});
       setCurrentDate(new Date(parsed.currentDate));
       setViewType(parsed.viewType);
       setNotesByDate(parsed.notesByDate ?? {});
       setNoteMetaByDate(parsed.noteMetaByDate ?? {});
+      setNoteTombstonesByDate(parsed.noteTombstonesByDate ?? {});
       setShowMonthPicker(false);
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
       window.alert('导入成功。');
@@ -673,6 +770,7 @@ export default function App() {
   }, []);
 
   const handleSaveNote = useCallback((dateKey: string, note: string) => {
+    const now = Date.now();
     setNotesByDate((prev) => {
       const trimmed = note.trim();
       if (!trimmed) {
@@ -682,7 +780,17 @@ export default function App() {
       }
       return { ...prev, [dateKey]: note };
     });
-    setNoteMetaByDate((prev) => ({ ...prev, [dateKey]: Date.now() }));
+    setNoteMetaByDate((prev) => ({ ...prev, [dateKey]: now }));
+    if (note.trim()) {
+      setNoteTombstonesByDate((prev) => {
+        if (!(dateKey in prev)) return prev;
+        const next = { ...prev };
+        delete next[dateKey];
+        return next;
+      });
+    } else {
+      setNoteTombstonesByDate((prev) => ({ ...prev, [dateKey]: now }));
+    }
   }, []);
 
   const handleTestNotification = useCallback(async () => {
@@ -808,8 +916,18 @@ export default function App() {
   const filteredTodos = getFilteredTodos();
 
   const getAccountSnapshot = useCallback((): PersistedData => {
-    return createPersistedPayload(todos, todoTombstones, events, currentDate, viewType, notesByDate, noteMetaByDate);
-  }, [todos, todoTombstones, events, currentDate, viewType, notesByDate, noteMetaByDate]);
+    return createPersistedPayload(
+      todos,
+      todoTombstones,
+      events,
+      eventTombstones,
+      currentDate,
+      viewType,
+      notesByDate,
+      noteMetaByDate,
+      noteTombstonesByDate
+    );
+  }, [todos, todoTombstones, events, eventTombstones, currentDate, viewType, notesByDate, noteMetaByDate, noteTombstonesByDate]);
 
   const applyAccountSnapshot = useCallback((snapshot: unknown) => {
     if (!isPersistedDataLike(snapshot)) {
@@ -827,8 +945,20 @@ export default function App() {
       snapshot.todos,
       snapshot.todoTombstones ?? {}
     );
-    const mergedEvents = mergeEventRecords(eventsRef.current, snapshot.events);
-    const mergedNotes = mergeNoteRecords(notesByDate, noteMetaByDate, snapshot.notesByDate ?? {}, snapshot.noteMetaByDate ?? {});
+    const mergedEvents = mergeEventRecords(
+      eventsRef.current,
+      eventTombstones,
+      snapshot.events,
+      snapshot.eventTombstones ?? {}
+    );
+    const mergedNotes = mergeNoteRecords(
+      notesByDate,
+      noteMetaByDate,
+      noteTombstonesByDate,
+      snapshot.notesByDate ?? {},
+      snapshot.noteMetaByDate ?? {},
+      snapshot.noteTombstonesByDate ?? {}
+    );
     setTodos(merged.todos);
     setTodoTombstones(merged.tombstones);
     if (merged.fieldMergeCount > 0 || merged.conflictCount > 0) {
@@ -853,11 +983,13 @@ export default function App() {
       setNoteMergeHint('');
     }
     setEvents(mergedEvents.events);
+    setEventTombstones(mergedEvents.tombstones);
     setCurrentDate(nextDate);
     setViewType(snapshot.viewType);
     setNotesByDate(mergedNotes.notesByDate);
     setNoteMetaByDate(mergedNotes.noteMetaByDate);
-  }, [noteMetaByDate, notesByDate, todoTombstones]);
+    setNoteTombstonesByDate(mergedNotes.noteTombstonesByDate);
+  }, [eventTombstones, noteMetaByDate, noteTombstonesByDate, notesByDate, todoTombstones]);
 
   return (
     <div className="h-screen w-screen bg-[#1A1A1F] flex flex-col p-6 overflow-hidden">

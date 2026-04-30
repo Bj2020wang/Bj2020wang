@@ -178,7 +178,8 @@
 
 - **云函数代码**：与仓库 `cloudfunctions/newworld/` 保持一致并重新发布。  
 - **HTTP 路由**：生产环境建议重新开启「身份认证」，并确认前端请求已带 `Authorization: Bearer <CloudBase 访问令牌>`（当前前端 `authApi.ts` 已按此方式调用）。  
-- **安全域名**：继续只保留可信域名（含打包后桌面应用若走自定义协议需单独评估）。  
+- **安全域名**：继续只保留可信域名。  
+  - **重要（Tauri 桌面安装包）**：`npm run dev` 时页面来源是 `http://localhost:1420`，打包后 Windows 上多为 **`http://tauri.localhost`** 或 **`https://tauri.localhost`**（少数环境为 `tauri://localhost`）。若控制台「Web 安全域名」只配置了 localhost:1420，安装包里发码 / 匿名登录会出现 **`Failed to fetch`**。请在 CloudBase → 环境 → **安全配置** → **Web 安全域名** 中追加上述 `tauri.localhost` / `tauri://localhost` 条目（与开发用域名并存即可），保存后重开应用再试。  
 - **数据库权限**：`email_codes` / `user_tokens` 等集合仅允许云函数访问，勿对前端直连开放写权限。  
 - **`user_snapshots`（前端可直连时）**：建议 `read` / `write` 均为 `doc.dbAuthUid == auth.uid`；文档需带 `dbAuthUid`（云函数在验码 / 拉取 / 推送时会补齐）。自定义登录私钥见云函数环境变量 `TCB_CUSTOM_LOGIN_PRIVATE_KEY` / `TCB_CUSTOM_LOGIN_PRIVATE_KEY_ID`。
 

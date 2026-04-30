@@ -1,5 +1,6 @@
 import { getHttpAuthorizationToken } from './cloudbase';
 import { getAccountHttpUrl } from './config';
+import { throwIfTauriFetchLikelySecurityDomain } from './desktopFetchHint';
 
 export type AccountApiEnvelope<T = unknown> = {
   code: number;
@@ -39,15 +40,21 @@ export async function postAccountAction<T = unknown>(body: {
   payload?: Record<string, unknown>;
 }): Promise<AccountApiEnvelope<T>> {
   const accessToken = await getHttpAuthorizationToken();
-  const res = await fetch(getAccountHttpUrl(), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetch(getAccountHttpUrl(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    throwIfTauriFetchLikelySecurityDomain(e);
+    throw e;
+  }
 
   let json: AccountApiEnvelope<T>;
   try {

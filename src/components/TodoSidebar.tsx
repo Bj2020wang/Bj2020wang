@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Plus, Settings, Pencil, Trash2, Check, X } from 'lucide-react';
 import type { TodoItem, ViewType, TodoCategory } from '@/types';
 import { getWeekDays, formatDateKey } from '@/lib/calendar-utils';
@@ -52,8 +52,12 @@ export default function TodoSidebar({
   const [newTodoCategory, setNewTodoCategory] = useState<TodoCategory>('work');
   const [categoryFilter, setCategoryFilter] = useState<'all' | TodoCategory>('all');
   const [showActionsMenu, setShowActionsMenu] = useState(false);
+  const [noteDraft, setNoteDraft] = useState(noteContent);
   const importInputRef = useRef<HTMLInputElement | null>(null);
-  const noteInputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    setNoteDraft(noteContent);
+  }, [noteContent, noteDateKey]);
 
   const handleDragStart = (e: React.DragEvent, todo: TodoItem) => {
     e.dataTransfer.setData('text/plain', todo.id);
@@ -383,22 +387,21 @@ export default function TodoSidebar({
       <div className="mt-4 pt-4 border-t border-[#2E2E36]">
         <div className="text-sm text-white mb-2">笔记（{noteDateKey}）</div>
         <textarea
-          key={noteDateKey}
-          ref={noteInputRef}
-          defaultValue={noteContent}
+          value={noteDraft}
+          onChange={(e) => setNoteDraft(e.target.value)}
           placeholder="写下今天的工作日记、笔记或感悟..."
           className="w-full min-h-[92px] px-3 py-2 bg-[#1A1A1F] border border-[#2E2E36] rounded-lg text-white text-sm placeholder-[#6B7280] focus:outline-none focus:border-[#D4A853] resize-y"
         />
         <div className="mt-2 flex gap-2">
           <button
-            onClick={() => onSaveNote(noteDateKey, noteInputRef.current?.value ?? '')}
+            onClick={() => onSaveNote(noteDateKey, noteDraft)}
             className="flex-1 px-3 py-2 text-xs rounded-md bg-[#D4A853] text-black font-medium hover:bg-[#C49A4A] transition-colors"
           >
             保存笔记
           </button>
           <button
             onClick={() => {
-              if (noteInputRef.current) noteInputRef.current.value = '';
+              setNoteDraft('');
               onSaveNote(noteDateKey, '');
             }}
             className="flex-1 px-3 py-2 text-xs rounded-md border border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors"
