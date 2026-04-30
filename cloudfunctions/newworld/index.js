@@ -8,6 +8,7 @@
  * - CLOUDBASE_PUBLISHABLE_KEY：与前端 .env 中 VITE_CLOUDBASE_PUBLISHABLE_KEY 相同（客户端 Publishable Key）
  * - CLOUDBASE_REGION：可选，默认 ap-shanghai
  * - CLOUDBASE_AUTH_API_BASE：可选，完整 Auth API 根 URL；不设则用 https://${TCB_ENV}.${region}.tcb-api.tencentcloudapi.com
+ * - TCB_CUSTOM_LOGIN_PRIVATE_KEY / TCB_CUSTOM_LOGIN_PRIVATE_KEY_ID：可选；与控制台「自定义登录」私钥一致时，验码接口可返回 customLoginTicket，供前端 signIn 后按安全规则直连 user_snapshots。
  *
  * 前置：控制台「身份认证 → 登录方式」中开启「邮箱验证码」，并完成内置邮件 / 代发配置。
  */
@@ -17,9 +18,39 @@ const crypto = require('crypto');
 const SNAPSHOT_HISTORY_LIMIT = 3;
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
-const db = app.database();
-const _ = db.command;
+function buildCloudbaseInitConfig() {
+  var cfg = { env: cloudbase.SYMBOL_CURRENT_ENV };
+  var pk = process.env.TCB_CUSTOM_LOGIN_PRIVATE_KEY;
+  var pkId = process.env.TCB_CUSTOM_LOGIN_PRIVATE_KEY_ID;
+  var envId = process.env.TCB_ENV || '';
+  if (pk && pkId && envId) {
+    cfg.credentials = {
+      private_key: String(pk).replace(/\\n/g, '\n'),
+      private_key_id: String(pkId).trim(),
+      env_id: String(envId).trim(),
+    };
+  }
+  return cfg;
+}
+
+var app = cloudbase.init(buildCloudbaseInitConfig());
+var db = app.database();
+var _ = db.command;
+
+/** 与前端 dbAuthUid.ts 一致：用于自定义登录 uid 及 user_snapshots.dbAuthUid */
+function dbAuthUidFromEmail(email) {
+  var norm = normalizeEmail(email);
+  return crypto.createHash('sha256').update(norm, 'utf8').digest('hex').slice(0, 32);
+}
+
+async function ensureSnapshotDbAuthUid(email) {
+  var expected = dbAuthUidFromEmail(email);
+  var snap = await db.collection('user_snapshots').where({ email: email }).limit(1).get();
+  if (!snap.data || !snap.data[0]) return;
+  var doc = snap.data[0];
+  if (doc.dbAuthUid === expected) return;
+  await db.collection('user_snapshots').doc(doc._id).update({ dbAuthUid: expected });
+}
 
 function jsonResponse(statusCode, bodyObj) {
   return {
@@ -280,7 +311,26 @@ async function handleVerifyCode(payload) {
     platform: platform,
   });
 
-  return ok({ token: token, email: email });
+  await ensureSnapshotDbAuthUid(email);
+
+  var customLoginTicket = null;
+  try {
+    var cred = app.config && app.config.credentials;
+    if (cred && cred.private_key && cred.private_key_id && cred.env_id) {
+      var uid = dbAuthUidFromEmail(email);
+      customLoginTicket = app.auth().createTicket(uid, {
+        refresh: 7 * 24 * 3600 * 1000,
+        expire: Date.now() + 7 * 24 * 3600 * 1000,
+      });
+    }
+  } catch (ticketErr) {
+    console.warn(
+      'newworld createTicket skipped',
+      ticketErr && ticketErr.message ? ticketErr.message : ticketErr
+    );
+  }
+
+  return ok({ token: token, email: email, customLoginTicket: customLoginTicket });
 }
 
 async function resolveEmailByToken(token) {
@@ -330,6 +380,8 @@ async function handlePull(payload) {
     return fail(401, 401, '登录已失效，请重新验证');
   }
 
+  await ensureSnapshotDbAuthUid(email);
+
   var snap = await db.collection('user_snapshots').where({ email: email }).limit(1).get();
   if (!snap.data || !snap.data[0]) {
     return ok({ email: email, snapshot: null, updatedAt: null });
@@ -352,6 +404,7 @@ async function handlePush(payload) {
     return fail(401, 401, '登录已失效，请重新验证');
   }
 
+  var dbUid = dbAuthUidFromEmail(email);
   var snapshot = payload.snapshot;
   var updatedAt = Date.now();
   var baseVersionRaw = payload.baseVersion;
@@ -405,6 +458,7 @@ async function handlePush(payload) {
       version: currentVersion + 1,
       lastWriterDeviceId: deviceId,
       lastWriterPlatform: platform,
+      dbAuthUid: dbUid,
     });
     return ok({
       email: email,
@@ -420,6 +474,7 @@ async function handlePush(payload) {
       version: 1,
       lastWriterDeviceId: deviceId,
       lastWriterPlatform: platform,
+      dbAuthUid: dbUid,
     });
     return ok({
       email: email,

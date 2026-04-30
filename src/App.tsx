@@ -6,6 +6,8 @@ import WeekView from '@/components/WeekView';
 import DayView from '@/components/DayView';
 import GlobalSearchPanel from '@/features/search/GlobalSearchPanel';
 import AccountLoginModal from '@/features/account/AccountLoginModal';
+import { useSharedAccountAuth } from '@/features/account/AccountAuthContext';
+import { AccountSyncConflictError } from '@/features/account/authApi';
 import type { ViewType, CalendarEvent, TodoItem, TodoCategory, TodoScopeType } from '@/types';
 import { getMonthDays, getWeekDays } from '@/lib/calendar-utils';
 import { useEventReminders } from '@/features/notifications/useEventReminders';
@@ -32,6 +34,9 @@ const defaultEvents: CalendarEvent[] = [
 ];
 
 const STORAGE_KEY = 'todo-calendar-local-v1';
+/** 与 AccountLoginModal 一致：完成过至少一次「拉取云端」后才自动推送，避免覆盖云端 */
+const FIRST_PULL_DONE_KEY = 'todo-calendar-first-pull-done';
+const AUTO_PUSH_DEBOUNCE_MS = 1200;
 
 interface PersistedData {
   todos: TodoItem[];
@@ -314,6 +319,8 @@ const mergeNoteRecords = (
 };
 
 export default function App() {
+  const { businessToken, pushSnapshot } = useSharedAccountAuth();
+  const autoPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [persisted] = useState<PersistedData | null>(() => loadPersistedData());
   const [currentDate, setCurrentDate] = useState(
     persisted?.currentDate ? new Date(persisted.currentDate) : new Date(2024, 9, 15)
@@ -352,6 +359,49 @@ export default function App() {
     const payload = createPersistedPayload(todos, todoTombstones, events, currentDate, viewType, notesByDate, noteMetaByDate);
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   }, [todos, todoTombstones, events, currentDate, viewType, notesByDate, noteMetaByDate]);
+
+  /** 已登录且完成过首次拉取后：本地数据变更则防抖推送到云端（与手动「推送云端」同接口） */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!businessToken) {
+      if (autoPushTimerRef.current) {
+        clearTimeout(autoPushTimerRef.current);
+        autoPushTimerRef.current = null;
+      }
+      return;
+    }
+    if (window.localStorage.getItem(FIRST_PULL_DONE_KEY) !== '1') return;
+
+    if (autoPushTimerRef.current) clearTimeout(autoPushTimerRef.current);
+    autoPushTimerRef.current = setTimeout(() => {
+      autoPushTimerRef.current = null;
+      const snap = createPersistedPayload(todos, todoTombstones, events, currentDate, viewType, notesByDate, noteMetaByDate);
+      void pushSnapshot(businessToken, snap).catch((e) => {
+        if (e instanceof AccountSyncConflictError) {
+          console.warn('[auto-push] 云端版本已变，请先拉取或稍后重试', e);
+          return;
+        }
+        console.warn('[auto-push] 推送失败', e);
+      });
+    }, AUTO_PUSH_DEBOUNCE_MS);
+
+    return () => {
+      if (autoPushTimerRef.current) {
+        clearTimeout(autoPushTimerRef.current);
+        autoPushTimerRef.current = null;
+      }
+    };
+  }, [
+    todos,
+    todoTombstones,
+    events,
+    currentDate,
+    viewType,
+    notesByDate,
+    noteMetaByDate,
+    businessToken,
+    pushSnapshot,
+  ]);
 
   // Navigation: prev/next based on current view
   const handlePrev = () => {

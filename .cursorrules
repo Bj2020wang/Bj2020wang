@@ -27,3 +27,11 @@
    - 自动同步必须分流决策：仅本地改动自动推、仅云端改动自动拉、双方改动先拉后推。
    - 首次登录未完成一次成功拉取前，禁止开启自动同步。
    - 自动处理结果必须可见：展示运行状态（未登录/同步中/空闲）、合并提示、上次拉取/推送时间。
+   - **App 级防抖自动 push**（2026-04-30）：`App.tsx` 在已登录且 `localStorage` 已标记完成首次拉取（`todo-calendar-first-pull-done`）后，对 Todo/事件/笔记等本地变更约 1.2s 内自动调用 `pushSnapshot`，与账号弹窗内手动推送同接口。
+
+6. CloudBase 混合同步架构（2026-04-30 定型）：
+   - **账号与快照主路径**仍为云函数 HTTP `newworld`（发码、验码、`pull`、`push`）；`user_snapshots` 可增加 **`dbAuthUid`** 字段，规则示例：`read`/`write` 均为 `doc.dbAuthUid == auth.uid`；验码接口可返回 **`customLoginTicket`**（云函数配置 `TCB_CUSTOM_LOGIN_PRIVATE_KEY` / `TCB_CUSTOM_LOGIN_PRIVATE_KEY_ID` 时）。
+   - **全应用共享一份登录态**：仅在 `main.tsx` 使用 `AccountAuthProvider`，业务与弹窗统一使用 **`useSharedAccountAuth()`**；禁止在 `App` 与 `AccountLoginModal`（或其它同级组件）各自调用 **`useAccountAuth()`** 导致 token / `baseVersion` 不一致。
+   - **文档库 `watch`** 在当前环境常报 `INIT_WATCH_FAIL` / `SYS_ERR`，产品侧以 **云函数 `pull` 定时轮询（约 15s）** 作为下行兜底；`watch` 仍保留作环境修复后的优化路径。
+   - **直连 `get` 轮询**在客户端规则/登录态未对齐时易返回空，下行兜底已改为 **HTTP `pull`**，与手动「拉取云端」一致。
+   - 调试前缀 **`[sync-debug]`**：修改 watch / poll / 自动推送相关逻辑时，保留或更新对应日志，便于用户控制台验收。

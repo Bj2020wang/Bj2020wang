@@ -1,11 +1,20 @@
-# 项目说明与功能入口（v0.1.0）
+# 项目说明与功能入口（v0.1.4）
 
 这份文档给你做长期参考：帮助你快速知道“哪个文件负责什么、功能入口在哪、以后怎么加功能不混乱”。
 
 ## 1. 目录与文件职责（关键）
 
 - `src/main.tsx`  
-  前端启动入口，把 `App` 挂载到页面。
+  前端启动入口：在 `BrowserRouter` 内用 **`AccountAuthProvider`** 包裹 `App`，保证全树共享同一份业务登录态与 `baseVersion`（禁止在 `App` 与 `AccountLoginModal` 各自 `useAccountAuth()`）。
+
+- `src/features/account/AccountAuthContext.tsx`  
+  `AccountAuthProvider` + `useSharedAccountAuth()`：账号 hook 的唯一挂载点。
+
+- `src/features/account/userSnapshotDb.ts`  
+  文档库 `user_snapshots` 的直连 `get` / `watch` 封装（当前环境 `watch` 常失败，以云函数 `pull` 轮询为主路径）。
+
+- `src/features/account/dbAuthUid.ts`  
+  邮箱 → `dbAuthUid`（SHA-256 十六进制前 32 位），与云函数 `newworld` 算法一致。
 
 - `src/App.tsx`  
   业务总中枢。主要状态和规则都在这里：Todo、日历事件、计数、笔记、本地存储、导入导出、视图切换。
@@ -170,25 +179,26 @@
 - **云函数代码**：与仓库 `cloudfunctions/newworld/` 保持一致并重新发布。  
 - **HTTP 路由**：生产环境建议重新开启「身份认证」，并确认前端请求已带 `Authorization: Bearer <CloudBase 访问令牌>`（当前前端 `authApi.ts` 已按此方式调用）。  
 - **安全域名**：继续只保留可信域名（含打包后桌面应用若走自定义协议需单独评估）。  
-- **数据库权限**：`email_codes` / `user_tokens` 等集合仅允许云函数访问，勿对前端直连开放写权限。
+- **数据库权限**：`email_codes` / `user_tokens` 等集合仅允许云函数访问，勿对前端直连开放写权限。  
+- **`user_snapshots`（前端可直连时）**：建议 `read` / `write` 均为 `doc.dbAuthUid == auth.uid`；文档需带 `dbAuthUid`（云函数在验码 / 拉取 / 推送时会补齐）。自定义登录私钥见云函数环境变量 `TCB_CUSTOM_LOGIN_PRIVATE_KEY` / `TCB_CUSTOM_LOGIN_PRIVATE_KEY_ID`。
 
 ## 8. 账号系统一期速查表（文件-函数-按钮）
 
 | 按钮/动作 | 先看文件 | 关键函数/入口 | 最终调用 |
 |---|---|---|---|
 | 顶部「账号」 | `src/App.tsx` | `setShowAccountLogin(true)` | 打开 `AccountLoginModal` |
-| 发送验证码 | `src/features/account/AccountLoginModal.tsx` | `handleSend()` | `useAccountAuth.sendCode()` -> `authApi.sendCode()` -> `/test` `action=send-code` |
-| 验证并登录 | `src/features/account/AccountLoginModal.tsx` | `handleVerify()` | `useAccountAuth.verify()` -> `authApi.verifyCode()` -> `/test` `action=verify-code` |
+| 发送验证码 | `src/features/account/AccountLoginModal.tsx` | `handleSend()` | `useSharedAccountAuth().sendCode()` -> `authApi.sendCode()` -> `/test` `action=send-code` |
+| 验证并登录 | `src/features/account/AccountLoginModal.tsx` | `handleVerify()` | `useSharedAccountAuth().verify()` -> `authApi.verifyCode()` -> `/test` `action=verify-code`（可返回 `customLoginTicket`） |
 | 匿名登录（自动） | `src/features/account/cloudbase.ts` | `ensureAnonymousSignIn()` | CloudBase `auth.signInAnonymously()` |
 | 取访问令牌（自动） | `src/features/account/cloudbase.ts` | `getCloudbaseAccessToken()` | CloudBase `auth.getAccessToken()` |
-| 推送云端 | `src/features/account/AccountLoginModal.tsx` + `src/App.tsx` | `handlePush()` + `getAccountSnapshot()` | `authApi.pushSnapshot()` -> `/test` `action=push` |
-| 拉取云端 | `src/features/account/AccountLoginModal.tsx` + `src/App.tsx` | `handlePull()` + `applyAccountSnapshot()` | `authApi.pullSnapshot()` -> `/test` `action=pull` |
+| 推送云端 | `src/features/account/AccountLoginModal.tsx` + `src/App.tsx` | `handlePush()` + `getAccountSnapshot()`；**另：**`App.tsx` 在已登录且完成首次拉取后对本地数据变更 **防抖自动 push** | `authApi.pushSnapshot()` -> `/test` `action=push` |
+| 拉取云端 | `src/features/account/AccountLoginModal.tsx` + `src/App.tsx` | `handlePull()` + `applyAccountSnapshot()`；**另：**`watch` 失败时弹窗内 **HTTP `pull` 轮询** | `authApi.pullSnapshot()` -> `/test` `action=pull` |
 | 接口地址/环境切换 | `src/features/account/config.ts` | `getAccountHttpUrl()` / `CLOUDBASE_ENV_ID` | 控制请求目标 |
 | 环境变量声明 | `src/vite-env.d.ts` | `VITE_CLOUDBASE_ENV_ID` / `VITE_ACCOUNT_HTTP_BASE` | 供 TS 校验与读取 |
 | 接口封装总入口 | `src/features/account/authApi.ts` | `postAccountAction()` | 统一 `POST /test` + Bearer |
 | 云函数（生产逻辑） | `cloudfunctions/newworld/index.js` | `exports.main` | 部署到 CloudBase 函数 `newworld` |
 
-一句话定位法：按钮问题看 `AccountLoginModal`；接口问题看 `authApi`；`ACTION_FORBIDDEN` 先查路由身份认证；拉取/推送问题看 `App.tsx` 快照导入导出函数；云端逻辑以 `cloudfunctions/newworld/index.js` 为准。
+一句话定位法：按钮问题看 `AccountLoginModal`；接口问题看 `authApi`；`ACTION_FORBIDDEN` 先查路由身份认证；拉取/推送问题看 `App.tsx` 快照导入导出函数；云端逻辑以 `cloudfunctions/newworld/index.js` 为准；**登录态不一致先查是否未包在 `AccountAuthProvider` 或误用 `useAccountAuth` 双实例。**
 
 ### 7.2 开启 HTTP 身份认证后出现 403
 
@@ -212,7 +222,9 @@
 
 - 自动同步常驻运行（关闭账号弹窗后仍生效）。  
 - 首次登录未拉取前禁止开启自动同步，避免空本地覆盖云端。  
-- 自动双向同步策略：  
+- **`App.tsx` 防抖自动推送**：已登录且本地存过「至少一次拉取成功」标记（`todo-calendar-first-pull-done`）后，Todo/事件/笔记/日期等本地变更约 **1.2s** 内自动 `push`（与手动推送同接口）。  
+- **云端下行**：理想路径为文档库 `watch`；当前环境常出现 `INIT_WATCH_FAIL`，产品侧以 **`pull` 定时轮询（约 15s）** 兜底，逻辑仍按 `version` 大于本地基线才应用。  
+- 自动双向同步策略（账号弹窗内「空闲自动推送」开关）：  
   - 仅本地改动：自动推  
   - 仅云端改动：自动拉  
   - 双方都有改动：先拉后推  
@@ -238,3 +250,26 @@
 3. A 改 event 时间、B 改 event 标题，最终能自动合并。  
 4. A/B 改同一日期备注，最终按较新版本收敛。  
 5. 自动同步开启后，关闭账号弹窗仍能继续同步。  
+6. 本地改一条 Todo 后，约 1～2 秒内云端 `user_snapshots.version` 递增（自动 push）；另一端在轮询周期内应看到更新。  
+
+
+## 10. 云端混合同步架构（2026-04-30）
+
+### 10.1 分层
+
+| 层级 | 方式 | 说明 |
+|------|------|------|
+| 账号 / 发码 / 验码 / 快照拉推 | 云函数 HTTP `newworld` | 与数据库安全规则无关；服务端可写 `user_snapshots`、`user_tokens` 等。 |
+| 下行实时（可选） | `@cloudbase/js-sdk` `watch` | 依赖自定义登录 + 库规则；当前环境易 `INIT_WATCH_FAIL`，**不作为唯一依赖**。 |
+| 下行兜底 | 云函数 `pull` 轮询 | `AccountLoginModal` 内 `watch` 报错后约 **15s** 一次，与手动拉取同路径。 |
+| 上行 | 云函数 `push` + **`App` 防抖自动 push** | 本地变更后约 **1.2s** 推送；须已完成至少一次「拉取云端」。 |
+
+### 10.2 数据字段
+
+- `user_snapshots` 除原有 `email`、`snapshot`、`version`、`updatedAt` 等外，增加 **`dbAuthUid`**（与邮箱规范化后 SHA-256 前 32 位十六进制一致），供规则 `doc.dbAuthUid == auth.uid` 使用。  
+- 云函数在 **验码、pull、push** 路径会 **补齐** 旧文档的 `dbAuthUid`。
+
+### 10.3 前端关键约定
+
+- **全应用只有一份账号状态**：`main.tsx` 使用 `AccountAuthProvider`；业务代码用 **`useSharedAccountAuth()`**，不要与 `useAccountAuth()` 混用导致双实例。  
+- 调试日志前缀 **`[sync-debug]`**（watch / poll / 自动推送冲突等），验收时可在浏览器 Console 过滤。

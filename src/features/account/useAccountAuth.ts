@@ -1,16 +1,26 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ACCOUNT_BASE_VERSION_KEY,
   ACCOUNT_DEVICE_ID_KEY,
+  ACCOUNT_EMAIL_KEY,
   ACCOUNT_TOKEN_KEY,
   ACCOUNT_VERIFICATION_EMAIL_KEY,
   ACCOUNT_VERIFICATION_ID_KEY,
 } from './config';
+import { signInWithCustomTicketIfPresent, signOutCloudbaseAuth } from './cloudbase';
 import * as api from './authApi';
 
 function readStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
   return sessionStorage.getItem(ACCOUNT_TOKEN_KEY);
+}
+
+function readStoredEmail(): string | null {
+  if (typeof window === 'undefined') return null;
+  const raw = sessionStorage.getItem(ACCOUNT_EMAIL_KEY);
+  if (!raw) return null;
+  const v = raw.trim().toLowerCase();
+  return v || null;
 }
 
 function ensureDeviceId(): string {
@@ -35,9 +45,14 @@ function readBaseVersion(): number {
 
 export function useAccountAuth() {
   const [businessToken, setBusinessToken] = useState<string | null>(() => readStoredToken());
+  const [accountEmail, setAccountEmail] = useState<string | null>(() => readStoredEmail());
   const [hint, setHint] = useState('');
   const [baseVersion, setBaseVersion] = useState<number>(() => readBaseVersion());
   const [deviceId] = useState<string>(() => ensureDeviceId());
+  const baseVersionRef = useRef(baseVersion);
+  useEffect(() => {
+    baseVersionRef.current = baseVersion;
+  }, [baseVersion]);
 
   const persistBusinessToken = useCallback((token: string | null) => {
     setBusinessToken(token);
@@ -74,7 +89,14 @@ export function useAccountAuth() {
       if (!token) throw new Error('未返回 token');
       sessionStorage.removeItem(ACCOUNT_VERIFICATION_ID_KEY);
       sessionStorage.removeItem(ACCOUNT_VERIFICATION_EMAIL_KEY);
+      sessionStorage.setItem(ACCOUNT_EMAIL_KEY, norm);
+      setAccountEmail(norm);
       persistBusinessToken(token);
+      try {
+        await signInWithCustomTicketIfPresent(res.data?.customLoginTicket ?? null);
+      } catch (e) {
+        console.warn('[account] 自定义登录未成功，直连数据库将不可用直至控制台配置票据', e);
+      }
       setHint('登录成功');
       return res.data;
     },
@@ -87,7 +109,10 @@ export function useAccountAuth() {
     if (typeof window !== 'undefined') {
       sessionStorage.removeItem(ACCOUNT_VERIFICATION_ID_KEY);
       sessionStorage.removeItem(ACCOUNT_VERIFICATION_EMAIL_KEY);
+      sessionStorage.removeItem(ACCOUNT_EMAIL_KEY);
     }
+    setAccountEmail(null);
+    void signOutCloudbaseAuth();
   }, [persistBusinessToken]);
 
   const updateBaseVersion = useCallback((next: number) => {
@@ -112,8 +137,44 @@ export function useAccountAuth() {
     [persistBusinessToken]
   );
 
+  const pullSnapshot = useCallback(
+    (token: string, opts?: { syncBaseVersion?: boolean }) =>
+      withAuthGuard(async () => {
+        const res = await api.pullSnapshot(token);
+        const em = res.data?.email;
+        if (em && typeof window !== 'undefined') {
+          const normalized = String(em).trim().toLowerCase();
+          sessionStorage.setItem(ACCOUNT_EMAIL_KEY, normalized);
+          setAccountEmail(normalized);
+        }
+        const ver = typeof res.data?.version === 'number' ? res.data.version : 0;
+        if (opts?.syncBaseVersion !== false) {
+          updateBaseVersion(ver);
+        }
+        return res;
+      }),
+    [withAuthGuard, updateBaseVersion]
+  );
+
+  const pushSnapshot = useCallback(
+    (token: string, snapshot: unknown, opts?: { force?: boolean }) =>
+      withAuthGuard(async () => {
+        const res = await api.pushSnapshot(token, snapshot, {
+          baseVersion: baseVersionRef.current,
+          deviceId,
+          platform: 'web',
+          force: opts?.force === true,
+        });
+        const ver = typeof res.data?.version === 'number' ? res.data.version : baseVersionRef.current;
+        updateBaseVersion(ver);
+        return res;
+      }),
+    [withAuthGuard, deviceId, updateBaseVersion]
+  );
+
   return {
     businessToken,
+    accountEmail,
     hint,
     setHint,
     sendCode,
@@ -122,29 +183,11 @@ export function useAccountAuth() {
     baseVersion,
     deviceId,
     persistBusinessToken,
-    pullSnapshot: (token: string, opts?: { syncBaseVersion?: boolean }) =>
-      withAuthGuard(async () => {
-        const res = await api.pullSnapshot(token);
-        const ver = typeof res.data?.version === 'number' ? res.data.version : 0;
-        if (opts?.syncBaseVersion !== false) {
-          updateBaseVersion(ver);
-        }
-        return res;
-      }),
-    pushSnapshot: (token: string, snapshot: unknown, opts?: { force?: boolean }) =>
-      withAuthGuard(async () => {
-        const res = await api.pushSnapshot(token, snapshot, {
-          baseVersion,
-          deviceId,
-          platform: 'web',
-          force: opts?.force === true,
-        });
-        const ver = typeof res.data?.version === 'number' ? res.data.version : baseVersion;
-        updateBaseVersion(ver);
-        return res;
-      }),
+    pullSnapshot,
+    pushSnapshot,
     listSnapshotHistory: (token: string) => withAuthGuard(() => api.listSnapshotHistory(token)),
     restoreSnapshotHistory: (token: string, historyId: string) =>
       withAuthGuard(() => api.restoreSnapshotHistory(token, historyId)),
+    updateBaseVersion,
   };
 }

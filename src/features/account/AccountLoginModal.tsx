@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
-import { useAccountAuth } from './useAccountAuth';
+import { useSharedAccountAuth } from './AccountAuthContext';
 import { AccountSyncConflictError } from './authApi';
 import type { SnapshotHistoryItem } from './authApi';
+import { watchUserSnapshotByEmail } from './userSnapshotDb';
+import type { UserSnapshotDocPayload } from './userSnapshotDb';
 
 const AUTO_PUSH_IDLE_MS = 30_000;
 const AUTO_PUSH_INTERVAL_MS = 60_000;
@@ -12,6 +14,8 @@ const AUTO_PUSH_LAST_AT_KEY = 'todo-calendar-auto-push-last-at';
 const FIRST_PULL_DONE_KEY = 'todo-calendar-first-pull-done';
 const ACCOUNT_LAST_PULL_AT_KEY = 'todo-calendar-account-last-pull-at';
 const ACCOUNT_LAST_PUSH_AT_KEY = 'todo-calendar-account-last-push-at';
+/** watch 不可用时用云函数 pull 轮询兜底（与手动「拉取云端」同路径，不依赖前端库可读） */
+const SNAPSHOT_POLL_INTERVAL_MS = 15_000;
 
 interface AccountLoginModalProps {
   open: boolean;
@@ -30,6 +34,7 @@ export default function AccountLoginModal({
 }: AccountLoginModalProps) {
   const {
     businessToken,
+    accountEmail,
     hint,
     sendCode,
     verify,
@@ -40,7 +45,8 @@ export default function AccountLoginModal({
     listSnapshotHistory,
     restoreSnapshotHistory,
     baseVersion,
-  } = useAccountAuth();
+    updateBaseVersion,
+  } = useSharedAccountAuth();
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -81,6 +87,139 @@ export default function AccountLoginModal({
   const lastAutoPushAtRef = useRef(0);
   const lastSyncActionAtRef = useRef(0);
   const lastReportedRuntimeRef = useRef<string>('');
+  const baseVersionRef = useRef(baseVersion);
+  const pullSnapshotRef = useRef(pullSnapshot);
+  pullSnapshotRef.current = pullSnapshot;
+
+  useEffect(() => {
+    baseVersionRef.current = baseVersion;
+  }, [baseVersion]);
+
+  /** 云端 user_snapshots 变更实时合并（需验码后拿到 customLoginTicket 且控制台配置好库权限） */
+  useEffect(() => {
+    if (typeof window === 'undefined' || !businessToken) return;
+    if (!accountEmail) return;
+
+    console.info('[sync-debug] watch start', {
+      email: accountEmail,
+      baseVersion: baseVersionRef.current,
+      ts: Date.now(),
+    });
+
+    let cancelled = false;
+    let closeFn: (() => void) | undefined;
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
+    let pollStarted = false;
+
+    const applyRemoteRow = (row: UserSnapshotDocPayload | null, source: 'watch' | 'poll') => {
+      if (cancelled) {
+        console.info('[sync-debug] apply ignored: cancelled', { source, ts: Date.now() });
+        return;
+      }
+      if (!row) {
+        console.info('[sync-debug] row empty', { source, ts: Date.now() });
+        return;
+      }
+      const v = row.version;
+      console.info('[sync-debug] remote row', {
+        source,
+        incomingVersion: v,
+        baseVersion: baseVersionRef.current,
+        updatedAt: row.updatedAt,
+        ts: Date.now(),
+      });
+      if (v <= baseVersionRef.current) {
+        console.info('[sync-debug] skipped by version gate', {
+          source,
+          incomingVersion: v,
+          baseVersion: baseVersionRef.current,
+          ts: Date.now(),
+        });
+        return;
+      }
+      console.info('[sync-debug] apply snapshot', {
+        source,
+        incomingVersion: v,
+        previousBaseVersion: baseVersionRef.current,
+        ts: Date.now(),
+      });
+      onPullSnapshot(row.snapshot);
+      updateBaseVersion(v);
+    };
+
+    const runPollPull = async () => {
+      if (cancelled || !businessToken) return;
+      try {
+        const res = await pullSnapshotRef.current(businessToken, { syncBaseVersion: false });
+        const cloudVer = typeof res.data?.version === 'number' ? res.data.version : 0;
+        const row: UserSnapshotDocPayload = {
+          snapshot: res.data?.snapshot ?? null,
+          updatedAt: typeof res.data?.updatedAt === 'number' ? res.data.updatedAt : null,
+          version: cloudVer,
+          lastWriterDeviceId:
+            typeof res.data?.lastWriterDeviceId === 'string' ? res.data.lastWriterDeviceId : null,
+          lastWriterPlatform:
+            typeof res.data?.lastWriterPlatform === 'string' ? res.data.lastWriterPlatform : null,
+        };
+        applyRemoteRow(row, 'poll');
+      } catch (e) {
+        console.warn('[sync-debug] poll pull failed', { e, ts: Date.now() });
+      }
+    };
+
+    const startPollFallback = () => {
+      if (pollStarted || cancelled) return;
+      pollStarted = true;
+      console.warn('[sync-debug] watch failed, starting HTTP poll fallback', {
+        email: accountEmail,
+        intervalMs: SNAPSHOT_POLL_INTERVAL_MS,
+        ts: Date.now(),
+      });
+      void runPollPull();
+      pollTimer = window.setInterval(() => {
+        void runPollPull();
+      }, SNAPSHOT_POLL_INTERVAL_MS);
+    };
+
+    void watchUserSnapshotByEmail(accountEmail, {
+      onChange: (row) => applyRemoteRow(row, 'watch'),
+      onError: (err) => {
+        const e = err as {
+          errCode?: unknown;
+          errMsg?: unknown;
+          message?: unknown;
+          original?: unknown;
+        } | null;
+        console.warn('[sync-debug] watch error', {
+          email: accountEmail,
+          errCode: e?.errCode ?? null,
+          errMsg: e?.errMsg ?? null,
+          message: e?.message ?? null,
+          original: e?.original ?? null,
+          err,
+          ts: Date.now(),
+        });
+        startPollFallback();
+      },
+    }).then((w) => {
+      if (cancelled) {
+        w.close();
+        return;
+      }
+      closeFn = w.close;
+      console.info('[sync-debug] watch ready', { email: accountEmail, ts: Date.now() });
+    });
+
+    return () => {
+      cancelled = true;
+      if (pollTimer != null) {
+        window.clearInterval(pollTimer);
+        pollTimer = undefined;
+      }
+      console.info('[sync-debug] watch cleanup', { email: accountEmail, ts: Date.now() });
+      closeFn?.();
+    };
+  }, [accountEmail, businessToken, onPullSnapshot, updateBaseVersion]);
 
   const reportRuntime = (status: '未登录' | '同步中' | '空闲') => {
     if (lastReportedRuntimeRef.current === status) return;

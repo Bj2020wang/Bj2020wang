@@ -98,7 +98,11 @@ export function sendCode(email: string) {
 }
 
 export function verifyCode(email: string, code: string, verificationId: string) {
-  return postAccountAction<{ token: string; email: string }>({
+  return postAccountAction<{
+    token: string;
+    email: string;
+    customLoginTicket?: string | null;
+  }>({
     action: 'verify-code',
     payload: { email, code, verificationId },
   });

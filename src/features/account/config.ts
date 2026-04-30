@@ -18,6 +18,9 @@ export const ACCOUNT_HTTP_PATH = '/test';
 /** 业务登录 token（verify-code 返回），仅存内存/sessionStorage */
 export const ACCOUNT_TOKEN_KEY = 'todo-calendar-account-token';
 
+/** 当前业务登录邮箱（小写），用于直连数据库查询与 watch */
+export const ACCOUNT_EMAIL_KEY = 'todo-calendar-account-email';
+
 /** 云开发内置邮箱验证码流程：发码接口返回的 verification_id（与邮箱成对暂存） */
 export const ACCOUNT_VERIFICATION_ID_KEY = 'todo-calendar-account-verification-id';
 export const ACCOUNT_VERIFICATION_EMAIL_KEY = 'todo-calendar-account-verification-email';

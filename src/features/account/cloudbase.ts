@@ -68,3 +68,37 @@ export async function getHttpAuthorizationToken(): Promise<string> {
   if (CLOUDBASE_PUBLISHABLE_KEY) return CLOUDBASE_PUBLISHABLE_KEY;
   return getCloudbaseAccessToken();
 }
+
+/**
+ * 使用云函数返回的票据切换为自定义登录（用于数据库安全规则中的 auth.uid）。
+ * 未配置自定义登录私钥时服务端不返回票据，本函数不应被调用。
+ */
+export async function signInWithCustomTicketIfPresent(ticket: string | null | undefined): Promise<void> {
+  if (ticket == null || typeof ticket !== 'string' || !ticket.trim()) return;
+  const auth = getCloudbaseApp().auth();
+  await auth.signInWithCustomTicket(() => Promise.resolve(ticket));
+  try {
+    const state = await auth.getLoginState();
+    const s = state as unknown as { uid?: unknown; isAnonymous?: unknown } | null;
+    const scopeFn = (auth as unknown as { loginScope?: () => Promise<string> }).loginScope;
+    const scope = typeof scopeFn === 'function' ? await scopeFn.call(auth) : 'unknown';
+    console.info('[sync-debug] custom sign-in done', {
+      hasLoginState: !!state,
+      loginScope: scope,
+      uid: s?.uid ?? null,
+      isAnonymous: s?.isAnonymous ?? null,
+      ts: Date.now(),
+    });
+  } catch (e) {
+    console.warn('[sync-debug] custom sign-in state read failed', { e, ts: Date.now() });
+  }
+}
+
+/** 退出 CloudBase 登录态（含自定义登录）；之后 HTTP 需要可再匿名登录 */
+export async function signOutCloudbaseAuth(): Promise<void> {
+  try {
+    await getCloudbaseApp().auth().signOut();
+  } catch {
+    // ignore
+  }
+}
