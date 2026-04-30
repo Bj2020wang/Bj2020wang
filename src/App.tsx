@@ -126,6 +126,18 @@ const normalizeTodoColorsByCategory = (todos: TodoItem[]): TodoItem[] =>
     return todo.color === targetColor ? todo : { ...todo, color: targetColor };
   });
 
+const normalizeEventColorsBySourceTodo = (events: CalendarEvent[], todos: TodoItem[]): CalendarEvent[] => {
+  const todoMap = new Map(todos.map((todo) => [todo.id, todo]));
+  return events.map((event) => {
+    const sourceTodoId = event.sourceTodoId;
+    if (!sourceTodoId) return event;
+    const sourceTodo = todoMap.get(sourceTodoId);
+    if (!sourceTodo) return event;
+    const targetColor = categoryColorMap[sourceTodo.category];
+    return event.color === targetColor ? event : { ...event, color: targetColor };
+  });
+};
+
 const createPersistedPayload = (
   todos: TodoItem[],
   todoTombstones: Record<string, number>,
@@ -370,15 +382,15 @@ export default function App() {
   const { businessToken, pushSnapshot } = useSharedAccountAuth();
   const autoPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [persisted] = useState<PersistedData | null>(() => loadPersistedData());
+  const initialTodos = normalizeTodoColorsByCategory(persisted?.todos ?? defaultTodos);
+  const initialEvents = normalizeEventColorsBySourceTodo(persisted?.events ?? defaultEvents, initialTodos);
   const [currentDate, setCurrentDate] = useState(
     persisted?.currentDate ? new Date(persisted.currentDate) : new Date(2024, 9, 15)
   ); // Oct 15, 2024
   const [viewType, setViewType] = useState<ViewType>(persisted?.viewType ?? 'month');
-  const [todos, setTodos] = useState<TodoItem[]>(() =>
-    normalizeTodoColorsByCategory(persisted?.todos ?? defaultTodos)
-  );
+  const [todos, setTodos] = useState<TodoItem[]>(() => initialTodos);
   const [todoTombstones, setTodoTombstones] = useState<Record<string, number>>(persisted?.todoTombstones ?? {});
-  const [events, setEvents] = useState<CalendarEvent[]>(persisted?.events ?? defaultEvents);
+  const [events, setEvents] = useState<CalendarEvent[]>(() => initialEvents);
   const [eventTombstones, setEventTombstones] = useState<Record<string, number>>(persisted?.eventTombstones ?? {});
   const [notesByDate, setNotesByDate] = useState<Record<string, string>>(persisted?.notesByDate ?? {});
   const [noteMetaByDate, setNoteMetaByDate] = useState<Record<string, number>>(persisted?.noteMetaByDate ?? {});
@@ -714,9 +726,10 @@ export default function App() {
     window.localStorage.removeItem(STORAGE_KEY);
     setCurrentDate(new Date(2024, 9, 15));
     setViewType('month');
-    setTodos(defaultTodos);
+    const normalizedDefaults = normalizeTodoColorsByCategory(defaultTodos);
+    setTodos(normalizedDefaults);
     setTodoTombstones({});
-    setEvents(defaultEvents);
+    setEvents(normalizeEventColorsBySourceTodo(defaultEvents, normalizedDefaults));
     setEventTombstones({});
     setNotesByDate({});
     setNoteMetaByDate({});
@@ -760,9 +773,10 @@ export default function App() {
         return;
       }
 
-      setTodos(normalizeTodoColorsByCategory(parsed.todos));
+      const normalizedTodos = normalizeTodoColorsByCategory(parsed.todos);
+      setTodos(normalizedTodos);
       setTodoTombstones(parsed.todoTombstones ?? {});
-      setEvents(parsed.events);
+      setEvents(normalizeEventColorsBySourceTodo(parsed.events, normalizedTodos));
       setEventTombstones(parsed.eventTombstones ?? {});
       setCurrentDate(new Date(parsed.currentDate));
       setViewType(parsed.viewType);
@@ -967,7 +981,8 @@ export default function App() {
       snapshot.noteMetaByDate ?? {},
       snapshot.noteTombstonesByDate ?? {}
     );
-    setTodos(normalizeTodoColorsByCategory(merged.todos));
+    const normalizedTodos = normalizeTodoColorsByCategory(merged.todos);
+    setTodos(normalizedTodos);
     setTodoTombstones(merged.tombstones);
     if (merged.fieldMergeCount > 0 || merged.conflictCount > 0) {
       const parts: string[] = [];
@@ -990,7 +1005,7 @@ export default function App() {
     } else {
       setNoteMergeHint('');
     }
-    setEvents(mergedEvents.events);
+    setEvents(normalizeEventColorsBySourceTodo(mergedEvents.events, normalizedTodos));
     setEventTombstones(mergedEvents.tombstones);
     setCurrentDate(nextDate);
     setViewType(snapshot.viewType);

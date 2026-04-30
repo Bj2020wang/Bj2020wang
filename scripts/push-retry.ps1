@@ -13,39 +13,39 @@ function Write-Step([string]$Text) {
 }
 
 if ($MaxAttempts -lt 1) {
-  throw "MaxAttempts 必须 >= 1"
+  throw "MaxAttempts must be >= 1"
 }
 if ($IntervalSeconds -lt 1) {
-  throw "IntervalSeconds 必须 >= 1"
+  throw "IntervalSeconds must be >= 1"
 }
 
 try {
   $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
   Set-Location $repoRoot
 } catch {
-  throw "无法进入仓库目录：$($_.Exception.Message)"
+  throw "Cannot enter repo directory: $($_.Exception.Message)"
 }
 
-Write-Step "当前仓库状态"
+Write-Step "Current repository status"
 git status -sb
 
 for ($i = 1; $i -le $MaxAttempts; $i++) {
-  Write-Step "第 $i/$MaxAttempts 次推送：git push $Remote $Branch"
+  Write-Step "Attempt ${i}/${MaxAttempts}: git push $Remote $Branch"
   git push $Remote $Branch
   if ($LASTEXITCODE -eq 0) {
     Write-Host ""
-    Write-Host "推送成功 ✅" -ForegroundColor Green
+    Write-Host "Push succeeded." -ForegroundColor Green
     git status -sb
     exit 0
   }
 
   if ($i -lt $MaxAttempts) {
-    Write-Host "推送失败，$IntervalSeconds 秒后重试..." -ForegroundColor Yellow
+    Write-Host "Push failed. Retry in $IntervalSeconds seconds..." -ForegroundColor Yellow
     Start-Sleep -Seconds $IntervalSeconds
   }
 }
 
 Write-Host ""
-Write-Host "已达到最大重试次数，仍未推送成功 ❌" -ForegroundColor Red
+Write-Host "Reached max attempts. Push still failed." -ForegroundColor Red
 git status -sb
 exit 1
