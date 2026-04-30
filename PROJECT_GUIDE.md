@@ -2,6 +2,8 @@
 
 这份文档给你做长期参考：帮助你快速知道“哪个文件负责什么、功能入口在哪、以后怎么加功能不混乱”。
 
+> **文档增量（v0.1.6，见 CHANGELOG）**：已补充 **主题切换** 与 **Windows 个人打包 / `CARGO_TARGET_DIR`** 说明，见下文 **§2.7～§2.8**。当前安装包文件名中的版本号仍以 `src-tauri/tauri.conf.json` 的 `version` 为准。
+
 ## 1. 目录与文件职责（关键）
 
 - `src/main.tsx`  
@@ -102,10 +104,22 @@
 - 测试入口：
   - 侧栏设置菜单的“测试通知”按钮（用于快速验证系统通知链路）
 
-### 2.7 EXE 打包入口
-- 配置：`src-tauri/tauri.conf.json`
-- 命令：`npx tauri build -b nsis`
-- 已处理的拖拽兼容配置：`dragDropEnabled: false`
+### 2.7 EXE 打包入口（个人使用与分发）
+- 配置：`src-tauri/tauri.conf.json`（`productName`、`version`、图标、`beforeBuildCommand` 等）。
+- **仅打安装包（常用）**：在项目根目录执行 `npx tauri build -b nsis`。会先跑 `npm run build`（前端进 `dist/`），再编译 Rust 并调用 NSIS。安装包文件名形如：`Todo Calendar_<version>_x64-setup.exe`。
+- **绿色版 exe**：同次构建还会在 Cargo 输出目录的 `release\app.exe`（具体路径见下条 `CARGO_TARGET_DIR`）。分发给别人时更推荐安装包，依赖更完整。
+- **链接失败 `LNK1105` / 错误代码 `1224`**（无法关闭临时目录下的 exe）：多为杀毒/索引或工具链占用临时目录。可在 PowerShell 中指定固定产物目录后再构建，例如：
+  - `$env:CARGO_TARGET_DIR = "C:\Users\<你的用户名>\tauri-cargo-target\app"`
+  - `npx tauri build -b nsis`
+  仓库内 `scripts\release.ps1` 已使用该思路（并设 `CARGO_BUILD_JOBS=1` 等）；个人日常打包可直接照抄这两行环境变量。
+- **归档位置**：可将生成的 `*_x64-setup.exe` 复制到仓库 `release\v<版本号>\`，与历史版本并列，便于自己或他人下载安装。
+- **正式发布**：仍需遵守 `.cursorrules`：EXE 版本号与 Git 标签一致时，用 `scripts\release.ps1`（干净工作区 + 标签校验 + 构建 + 复制到 `release/`）。
+- 已处理的拖拽兼容配置：`dragDropEnabled: false`。
+
+### 2.8 主题切换（深 / 浅）
+- **入口**：主界面顶栏「搜索」按钮左侧，太阳 / 月亮图标按钮；深色模式下显示太阳（点击切换到浅色），浅色模式下显示月亮（切回深色）。
+- **实现**：`src/features/theme/useAppTheme.ts` 读写 `localStorage`；`src/index.css` 中 `:root` 为深色壳层变量，`html.theme-light` 为浅色暖底 + 橙点缀（`--shell-*`）。主布局、侧栏、月/周/日视图、账号弹窗、全局搜索等已统一使用这些变量。
+- **说明**：任务/事件的分类颜色仍为数据字段中的颜色，不受主题切换覆盖。
 
 
 ## 3. 典型调用链（便于理解）
