@@ -586,7 +586,7 @@ export default function AccountLoginModal({
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
       <div
-        className="relative w-full max-w-md rounded-xl border border-[#2E2E36] bg-[#212128] shadow-xl"
+        className="relative w-full max-w-md rounded-xl border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] shadow-xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby="account-login-title"
@@ -594,35 +594,35 @@ export default function AccountLoginModal({
         <button
           type="button"
           onClick={onClose}
-          className="absolute right-3 top-3 rounded-lg p-1 text-[#9CA3AF] hover:bg-[#2A2A32] hover:text-white"
+          className="absolute right-3 top-3 rounded-lg p-1 text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] hover:text-[var(--shell-text-strong)]"
           aria-label="关闭"
         >
           <X className="h-5 w-5" />
         </button>
 
-        <div className="border-b border-[#2E2E36] px-5 py-4">
-          <h2 id="account-login-title" className="text-lg font-semibold text-white">
+        <div className="border-b border-[var(--shell-border-subtle)] px-5 py-4">
+          <h2 id="account-login-title" className="text-lg font-semibold text-[var(--shell-text-strong)]">
             账号（邮箱验证码）
           </h2>
-          <p className="mt-1 text-xs text-[#9CA3AF]">
+          <p className="mt-1 text-xs text-[var(--shell-text-muted)]">
             首次会先匿名登录 CloudBase，再调用云端接口；业务 token 仅存本会话。
           </p>
         </div>
 
         <div className="space-y-3 px-5 py-4">
           {businessToken ? (
-            <div className="rounded-lg bg-[#2A2A32] px-3 py-2 text-sm text-emerald-300">
+            <div className="rounded-lg bg-[var(--shell-surface-hover)] px-3 py-2 text-sm text-emerald-300">
               当前已登录（业务会话）
             </div>
           ) : null}
 
-          <label className="block text-xs font-medium text-[#9CA3AF]">
+          <label className="block text-xs font-medium text-[var(--shell-text-muted)]">
             邮箱
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[#3E3E48] bg-[#1A1A1F] px-3 py-2 text-sm text-white outline-none focus:border-[#D4A853]"
+              className="mt-1 w-full rounded-lg border border-[var(--shell-border)] bg-[var(--shell-elevated)] px-3 py-2 text-sm text-[var(--shell-text-strong)] outline-none focus:border-[var(--shell-accent)]"
               placeholder="you@example.com"
               autoComplete="email"
               disabled={busy}
@@ -630,14 +630,14 @@ export default function AccountLoginModal({
           </label>
 
           <div className="flex gap-2">
-            <label className="block flex-1 text-xs font-medium text-[#9CA3AF]">
+            <label className="block flex-1 text-xs font-medium text-[var(--shell-text-muted)]">
               验证码
               <input
                 type="text"
                 inputMode="numeric"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-[#3E3E48] bg-[#1A1A1F] px-3 py-2 text-sm text-white outline-none focus:border-[#D4A853]"
+                className="mt-1 w-full rounded-lg border border-[var(--shell-border)] bg-[var(--shell-elevated)] px-3 py-2 text-sm text-[var(--shell-text-strong)] outline-none focus:border-[var(--shell-accent)]"
                 placeholder="6 位数字"
                 disabled={busy}
               />
@@ -645,13 +645,13 @@ export default function AccountLoginModal({
           </div>
 
           {(error || hint || syncStatus) && (
-            <p className={`text-sm ${error ? 'text-red-400' : 'text-[#9CA3AF]'}`}>
+            <p className={`text-sm ${error ? 'text-red-400' : 'text-[var(--shell-text-muted)]'}`}>
               {error || hint || syncStatus}
             </p>
           )}
 
           {businessToken ? (
-            <label className="flex items-center gap-2 text-xs text-[#9CA3AF]">
+            <label className="flex items-center gap-2 text-xs text-[var(--shell-text-muted)]">
               <input
                 type="checkbox"
                 checked={autoPushEnabled}
@@ -674,15 +674,15 @@ export default function AccountLoginModal({
           ) : null}
 
           {businessToken && autoPushEnabled ? (
-            <p className="text-xs text-[#9CA3AF]">
+            <p className="text-xs text-[var(--shell-text-muted)]">
               上次自动推送时间：{formatTime(lastAutoPushAt)}
             </p>
           ) : null}
           {businessToken ? (
-            <p className="text-xs text-[#9CA3AF]">上次拉取时间：{formatTime(lastPullAt)}</p>
+            <p className="text-xs text-[var(--shell-text-muted)]">上次拉取时间：{formatTime(lastPullAt)}</p>
           ) : null}
           {businessToken ? (
-            <p className="text-xs text-[#9CA3AF]">上次推送时间：{formatTime(lastPushAt)}</p>
+            <p className="text-xs text-[var(--shell-text-muted)]">上次推送时间：{formatTime(lastPushAt)}</p>
           ) : null}
 
           <div className="flex flex-wrap gap-2 pt-1">
@@ -690,7 +690,7 @@ export default function AccountLoginModal({
               type="button"
               disabled={busy}
               onClick={handleSend}
-              className="rounded-lg bg-[#3E3E48] px-4 py-2 text-sm font-medium text-white hover:bg-[#4B5563] disabled:opacity-50"
+              className="rounded-lg bg-[var(--shell-border)] px-4 py-2 text-sm font-medium text-[var(--shell-text-strong)] hover:bg-[var(--shell-faint)] disabled:opacity-50"
             >
               发送验证码
             </button>
@@ -698,7 +698,7 @@ export default function AccountLoginModal({
               type="button"
               disabled={busy}
               onClick={handleVerify}
-              className="rounded-lg bg-[#D4A853] px-4 py-2 text-sm font-medium text-black hover:bg-[#e8c066] disabled:opacity-50"
+              className="rounded-lg bg-[var(--shell-accent)] px-4 py-2 text-sm font-medium text-[var(--shell-accent-contrast)] hover:bg-[var(--shell-accent-hover)] disabled:opacity-50"
             >
               验证并登录
             </button>
@@ -708,7 +708,7 @@ export default function AccountLoginModal({
                   type="button"
                   disabled={busy}
                   onClick={handlePull}
-                  className="rounded-lg border border-[#3E3E48] px-4 py-2 text-sm text-[#9CA3AF] hover:bg-[#2A2A32] disabled:opacity-50"
+                  className="rounded-lg border border-[var(--shell-border)] px-4 py-2 text-sm text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
                 >
                   拉取云端
                 </button>
@@ -716,7 +716,7 @@ export default function AccountLoginModal({
                   type="button"
                   disabled={busy}
                   onClick={handlePush}
-                  className="rounded-lg border border-[#3E3E48] px-4 py-2 text-sm text-[#9CA3AF] hover:bg-[#2A2A32] disabled:opacity-50"
+                  className="rounded-lg border border-[var(--shell-border)] px-4 py-2 text-sm text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
                 >
                   推送云端
                 </button>
@@ -724,7 +724,7 @@ export default function AccountLoginModal({
                   type="button"
                   disabled={busy}
                   onClick={handleLoadHistory}
-                  className="rounded-lg border border-[#3E3E48] px-4 py-2 text-sm text-[#9CA3AF] hover:bg-[#2A2A32] disabled:opacity-50"
+                  className="rounded-lg border border-[var(--shell-border)] px-4 py-2 text-sm text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
                 >
                   查看历史
                 </button>
@@ -739,7 +739,7 @@ export default function AccountLoginModal({
                   setHint('');
                   setCode('');
                 }}
-                className="rounded-lg border border-[#3E3E48] px-4 py-2 text-sm text-[#9CA3AF] hover:bg-[#2A2A32]"
+                className="rounded-lg border border-[var(--shell-border)] px-4 py-2 text-sm text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]"
               >
                 退出业务登录
               </button>
@@ -747,12 +747,12 @@ export default function AccountLoginModal({
           </div>
 
           {businessToken && historyItems.length > 0 ? (
-            <div className="rounded-lg border border-[#2E2E36] bg-[#1A1A1F] p-3">
-              <p className="mb-2 text-xs font-medium text-[#9CA3AF]">云端历史快照（最近 3 条）</p>
+            <div className="rounded-lg border border-[var(--shell-border-subtle)] bg-[var(--shell-elevated)] p-3">
+              <p className="mb-2 text-xs font-medium text-[var(--shell-text-muted)]">云端历史快照（最近 3 条）</p>
               <div className="space-y-2">
                 {historyItems.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between gap-2 rounded-md bg-[#212128] px-2 py-2">
-                    <div className="min-w-0 text-xs text-[#9CA3AF]">
+                  <div key={item.id} className="flex items-center justify-between gap-2 rounded-md bg-[var(--shell-panel)] px-2 py-2">
+                    <div className="min-w-0 text-xs text-[var(--shell-text-muted)]">
                       <p>备份时间：{formatTime(item.backupAt ?? null)}</p>
                       <p>快照原时间：{formatTime(item.updatedAt ?? null)}</p>
                     </div>
@@ -760,7 +760,7 @@ export default function AccountLoginModal({
                       type="button"
                       disabled={busy}
                       onClick={() => handleRestoreHistory(item)}
-                      className="shrink-0 rounded-md border border-[#3E3E48] px-3 py-1 text-xs text-[#9CA3AF] hover:bg-[#2A2A32] disabled:opacity-50"
+                      className="shrink-0 rounded-md border border-[var(--shell-border)] px-3 py-1 text-xs text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
                     >
                       恢复
                     </button>

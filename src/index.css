@@ -43,3 +43,80 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* 应用壳层主题（主布局、侧栏、日历面板）。默认深色；html.theme-light 为浅暖色 + 橙点缀 */
+:root {
+  --shell-bg: #1a1a1f;
+  --shell-panel: #212128;
+  --shell-elevated: #1a1a1f;
+  --shell-surface-hover: #2a2a32;
+  --shell-inset: #1e1e24;
+  --shell-border: #3e3e48;
+  --shell-border-subtle: #2e2e36;
+  --shell-grid: #2e2e36;
+  --shell-text: #ffffff;
+  --shell-text-strong: #ffffff;
+  --shell-text-muted: #9ca3af;
+  --shell-subtle: #6b7280;
+  --shell-faint: #4b5563;
+  --shell-accent: #d4a853;
+  --shell-accent-hover: #c49a4a;
+  --shell-accent-contrast: #000000;
+  --shell-accent-soft: rgba(212, 168, 83, 0.08);
+  --shell-accent-glow: rgba(212, 168, 83, 0.6);
+  --shell-icon: #ffffff;
+  --shell-input-bg: #1a1a1f;
+  --shell-input-deep: #111115;
+  --shell-placeholder: #6b7280;
+  --shell-disabled-bg: #2e2e36;
+  --shell-btn-secondary-bg: #2e2e36;
+  --shell-btn-secondary-hover: #3a3a44;
+  --shell-menu-bg: #1a1a1f;
+  --shell-scrollbar: #3e3e48;
+  --shell-scrollbar-hover: #4b5563;
+  --shell-drag-over-bg: #2a2a32;
+  --shell-drag-over-border: #d4a853;
+  --shell-cell-hover-overlay: rgba(255, 255, 255, 0.02);
+  --shell-today-pulse: rgba(212, 168, 83, 0.2);
+  --shell-list-hover: #23232b;
+  --shell-mark-bg: rgba(212, 168, 83, 0.3);
+  --shell-mark-text: #fcd34d;
+}
+
+html.theme-light {
+  --shell-bg: #f8f3ed;
+  --shell-panel: #ffffff;
+  --shell-elevated: #ffffff;
+  --shell-surface-hover: #f0ebe3;
+  --shell-inset: #faf8f5;
+  --shell-border: #e5e7eb;
+  --shell-border-subtle: #e7dfd4;
+  --shell-grid: #e7dfd4;
+  --shell-text: #1f2937;
+  --shell-text-strong: #111827;
+  --shell-text-muted: #6b7280;
+  --shell-subtle: #6b7280;
+  --shell-faint: #9ca3af;
+  --shell-accent: #f08a24;
+  --shell-accent-hover: #e07d1a;
+  --shell-accent-contrast: #ffffff;
+  --shell-accent-soft: rgba(240, 138, 36, 0.1);
+  --shell-accent-glow: rgba(240, 138, 36, 0.55);
+  --shell-icon: #1f2937;
+  --shell-input-bg: #ffffff;
+  --shell-input-deep: #faf8f5;
+  --shell-placeholder: #9ca3af;
+  --shell-disabled-bg: #e8e2d9;
+  --shell-btn-secondary-bg: #e8e2d9;
+  --shell-btn-secondary-hover: #ddd6cb;
+  --shell-menu-bg: #ffffff;
+  --shell-scrollbar: #d6cfc4;
+  --shell-scrollbar-hover: #c4bbb0;
+  --shell-drag-over-bg: #f0ebe3;
+  --shell-drag-over-border: #f08a24;
+  --shell-cell-hover-overlay: rgba(0, 0, 0, 0.03);
+  --shell-today-pulse: rgba(240, 138, 36, 0.25);
+  --shell-list-hover: #ede8e0;
+  --shell-mark-bg: rgba(240, 138, 36, 0.22);
+  --shell-mark-text: #c2410c;
+}

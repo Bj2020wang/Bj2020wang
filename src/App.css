@@ -11,12 +11,12 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3E3E48;
+  background: var(--shell-scrollbar);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #4B5563;
+  background: var(--shell-scrollbar-hover);
 }
 
 /* Smooth transitions */
@@ -48,7 +48,7 @@
 }
 
 .calendar-cell:hover::before {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--shell-cell-hover-overlay);
 }
 
 /* Event tag animation */
@@ -70,10 +70,10 @@
 /* Today indicator pulse */
 @keyframes pulse {
   0%, 100% {
-    box-shadow: 0 0 0 0 rgba(212, 168, 83, 0.2);
+    box-shadow: 0 0 0 0 var(--shell-today-pulse);
   }
   50% {
-    box-shadow: 0 0 0 4px rgba(212, 168, 83, 0);
+    box-shadow: 0 0 0 4px transparent;
   }
 }
 
@@ -83,6 +83,6 @@
 
 /* Drag over state */
 .drag-over {
-  background-color: #2A2A32 !important;
-  border: 2px dashed #D4A853 !important;
+  background-color: var(--shell-drag-over-bg) !important;
+  border: 2px dashed var(--shell-drag-over-border) !important;
 }

@@ -41,13 +41,13 @@ export default function CalendarGrid({
   const MAX_EVENT_TAGS = 2;
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#212128] rounded-xl p-4">
+    <div className="flex-1 flex flex-col h-full bg-[var(--shell-panel)] rounded-xl p-4">
       {/* Weekday Headers */}
       <div className="grid grid-cols-7 gap-0 mb-2">
         {WEEKDAYS.map((day) => (
           <div
             key={day}
-            className="text-center text-sm font-medium text-[#6B7280] py-2"
+            className="text-center text-sm font-medium text-[var(--shell-subtle)] py-2"
           >
             {day}
           </div>
@@ -55,7 +55,7 @@ export default function CalendarGrid({
       </div>
 
       {/* Calendar Grid */}
-      <div className="grid grid-cols-7 gap-px flex-1 bg-[#2E2E36] border border-[#2E2E36] rounded-lg overflow-hidden">
+      <div className="grid grid-cols-7 gap-px flex-1 bg-[var(--shell-grid)] border border-[var(--shell-grid)] rounded-lg overflow-hidden">
         {daysWithEvents.map((day, index) => {
           const dayEvents = day.events;
           const holidayEvent = dayEvents.find((e) => e.id.startsWith('holiday-'));
@@ -69,10 +69,10 @@ export default function CalendarGrid({
             <div
               key={index}
               className={`
-                relative bg-[#1E1E24] p-2 min-h-[100px] transition-colors duration-200
+                relative bg-[var(--shell-inset)] p-2 min-h-[100px] transition-colors duration-200
                 ${day.isCurrentMonth ? '' : 'opacity-50'}
-                ${day.isToday ? 'ring-1 ring-[#D4A853] ring-inset' : ''}
-                hover:bg-[#2A2A32]
+                ${day.isToday ? 'ring-1 ring-[var(--shell-accent)] ring-inset' : ''}
+                hover:bg-[var(--shell-surface-hover)]
               `}
               onClick={() => onDayClick?.(day.fullDate)}
               onDrop={(e) => handleDrop(e, day.fullDate)}
@@ -84,13 +84,13 @@ export default function CalendarGrid({
                   <span
                     className={`
                       text-base font-medium
-                      ${day.isCurrentMonth ? 'text-white' : 'text-[#4B5563]'}
+                      ${day.isCurrentMonth ? 'text-[var(--shell-text-strong)]' : 'text-[var(--shell-faint)]'}
                     `}
                   >
                     {day.date}
                   </span>
                   {notesByDate?.[day.fullDate]?.trim() && (
-                    <span className="text-[10px] leading-none px-1 py-0.5 rounded bg-[#D4A853] text-black">
+                    <span className="text-[10px] leading-none px-1 py-0.5 rounded bg-[var(--shell-accent)] text-[var(--shell-accent-contrast)]">
                       记
                     </span>
                   )}
@@ -100,9 +100,9 @@ export default function CalendarGrid({
                     <span className="text-xs text-[#10B981]">休</span>
                   )}
                   {day.isWorkDay && (
-                    <span className="text-xs text-[#6B7280]">班</span>
+                    <span className="text-xs text-[var(--shell-subtle)]">班</span>
                   )}
-                  <span className="text-xs text-[#6B7280]">{day.lunarDate}</span>
+                  <span className="text-xs text-[var(--shell-subtle)]">{day.lunarDate}</span>
                 </div>
               </div>
 
@@ -143,7 +143,7 @@ export default function CalendarGrid({
 
                 {/* Overflow indicator */}
                 {overflowCount > 0 && (
-                  <div className="text-xs text-[#6B7280] px-1 pt-0.5">
+                  <div className="text-xs text-[var(--shell-subtle)] px-1 pt-0.5">
                     ......
                   </div>
                 )}

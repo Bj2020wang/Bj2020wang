@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, ChevronDown, Search, User } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Search, User, Sun, Moon } from 'lucide-react';
 import TodoSidebar from '@/components/TodoSidebar';
 import CalendarGrid from '@/components/CalendarGrid';
 import WeekView from '@/components/WeekView';
@@ -11,6 +11,7 @@ import { AccountSyncConflictError } from '@/features/account/authApi';
 import type { ViewType, CalendarEvent, TodoItem, TodoCategory, TodoScopeType } from '@/types';
 import { getMonthDays, getWeekDays } from '@/lib/calendar-utils';
 import { useEventReminders } from '@/features/notifications/useEventReminders';
+import { useAppTheme } from '@/features/theme/useAppTheme';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import './App.css';
 
@@ -1014,8 +1015,10 @@ export default function App() {
     setNoteTombstonesByDate(mergedNotes.noteTombstonesByDate);
   }, [eventTombstones, noteMetaByDate, noteTombstonesByDate, notesByDate, todoTombstones]);
 
+  const { theme, toggleTheme } = useAppTheme();
+
   return (
-    <div className="h-screen w-screen bg-[#1A1A1F] flex flex-col p-6 overflow-hidden">
+    <div className="h-screen w-screen bg-[var(--shell-bg)] flex flex-col p-6 overflow-hidden">
       {/* Header */}
       <header className="flex items-center justify-between mb-6">
         {/* Left: Navigation */}
@@ -1023,32 +1026,32 @@ export default function App() {
           <div className="flex items-center gap-2">
             <button
               onClick={handlePrev}
-              className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[#2A2A32] transition-colors duration-200"
+              className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[var(--shell-surface-hover)] transition-colors duration-200"
             >
-              <ChevronLeft className="w-5 h-5 text-white" />
+              <ChevronLeft className="w-5 h-5 text-[var(--shell-icon)]" />
             </button>
             <button
               onClick={handleNext}
-              className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[#2A2A32] transition-colors duration-200"
+              className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[var(--shell-surface-hover)] transition-colors duration-200"
             >
-              <ChevronRight className="w-5 h-5 text-white" />
+              <ChevronRight className="w-5 h-5 text-[var(--shell-icon)]" />
             </button>
           </div>
           <div className="relative">
             {showMonthDropdown ? (
               <button
                 onClick={() => setShowMonthPicker(!showMonthPicker)}
-                className="flex items-center gap-1 text-xl font-semibold text-white hover:text-[#D4A853] transition-colors"
+                className="flex items-center gap-1 text-xl font-semibold text-[var(--shell-text-strong)] hover:text-[var(--shell-accent)] transition-colors"
               >
                 {headerLabel}
                 <ChevronDown className="w-4 h-4" />
               </button>
             ) : (
-              <span className="text-xl font-semibold text-white">{headerLabel}</span>
+              <span className="text-xl font-semibold text-[var(--shell-text-strong)]">{headerLabel}</span>
             )}
             {showMonthPicker && showMonthDropdown && (
-              <div className="absolute top-full left-0 mt-2 bg-[#212128] border border-[#2E2E36] rounded-xl shadow-xl z-50 p-3 w-64">
-                <div className="text-sm font-medium text-[#9CA3AF] mb-2">{year}年</div>
+              <div className="absolute top-full left-0 mt-2 bg-[var(--shell-panel)] border border-[var(--shell-border-subtle)] rounded-xl shadow-xl z-50 p-3 w-64">
+                <div className="text-sm font-medium text-[var(--shell-text-muted)] mb-2">{year}年</div>
                 <div className="grid grid-cols-3 gap-2">
                   {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
                     <button
@@ -1057,8 +1060,8 @@ export default function App() {
                       className={`
                         px-3 py-2 rounded-lg text-sm font-medium transition-colors
                         ${m === month
-                          ? 'bg-[#D4A853] text-black'
-                          : 'text-white hover:bg-[#2A2A32]'
+                          ? 'bg-[var(--shell-accent)] text-[var(--shell-accent-contrast)]'
+                          : 'text-[var(--shell-text-strong)] hover:bg-[var(--shell-surface-hover)]'
                         }
                       `}
                     >
@@ -1074,8 +1077,16 @@ export default function App() {
         {/* Right: View Toggle */}
         <div className="flex items-center gap-2">
           <button
+            type="button"
+            onClick={toggleTheme}
+            className="w-9 h-9 flex items-center justify-center rounded-lg border border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] transition-colors duration-200"
+            title={theme === 'dark' ? '切换为浅色暖色主题' : '切换为深色主题'}
+          >
+            {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </button>
+          <button
             onClick={() => setShowGlobalSearch(true)}
-            className="px-3 py-2 rounded-lg text-sm font-medium border border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors duration-200 flex items-center gap-1"
+            className="px-3 py-2 rounded-lg text-sm font-medium border border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] transition-colors duration-200 flex items-center gap-1"
             title="全局关键词搜索"
           >
             <Search className="w-4 h-4" />
@@ -1084,23 +1095,23 @@ export default function App() {
           <button
             type="button"
             onClick={() => setShowAccountLogin(true)}
-            className="px-3 py-2 rounded-lg text-sm font-medium border border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors duration-200 flex items-center gap-1"
+            className="px-3 py-2 rounded-lg text-sm font-medium border border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] transition-colors duration-200 flex items-center gap-1"
             title="账号登录与云端同步（演示）"
           >
             <User className="w-4 h-4" />
             账号
           </button>
-          <span className="text-xs text-[#9CA3AF]">{accountSyncRuntime}</span>
-          {todoMergeHint ? <span className="text-xs text-[#D4A853]">{todoMergeHint}</span> : null}
-          {eventMergeHint ? <span className="text-xs text-[#D4A853]">{eventMergeHint}</span> : null}
-          {noteMergeHint ? <span className="text-xs text-[#D4A853]">{noteMergeHint}</span> : null}
+          <span className="text-xs text-[var(--shell-text-muted)]">{accountSyncRuntime}</span>
+          {todoMergeHint ? <span className="text-xs text-[var(--shell-accent)]">{todoMergeHint}</span> : null}
+          {eventMergeHint ? <span className="text-xs text-[var(--shell-accent)]">{eventMergeHint}</span> : null}
+          {noteMergeHint ? <span className="text-xs text-[var(--shell-accent)]">{noteMergeHint}</span> : null}
           <button
             onClick={handleToday}
             className={`
               px-4 py-2 rounded-lg text-sm font-medium border transition-colors duration-200
               ${viewType === 'today'
-                ? 'border-[#D4A853] text-[#D4A853] bg-transparent'
-                : 'border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32]'
+                ? 'border-[var(--shell-accent)] text-[var(--shell-accent)] bg-transparent'
+                : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
               }
             `}
           >
@@ -1111,8 +1122,8 @@ export default function App() {
             className={`
               px-4 py-2 rounded-lg text-sm font-medium border transition-colors duration-200
               ${viewType === 'week'
-                ? 'border-[#D4A853] text-[#D4A853] bg-transparent'
-                : 'border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32]'
+                ? 'border-[var(--shell-accent)] text-[var(--shell-accent)] bg-transparent'
+                : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
               }
             `}
           >
@@ -1123,8 +1134,8 @@ export default function App() {
             className={`
               px-4 py-2 rounded-lg text-sm font-medium border transition-colors duration-200
               ${viewType === 'month'
-                ? 'border-[#D4A853] text-[#D4A853] bg-transparent'
-                : 'border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32]'
+                ? 'border-[var(--shell-accent)] text-[var(--shell-accent)] bg-transparent'
+                : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
               }
             `}
           >

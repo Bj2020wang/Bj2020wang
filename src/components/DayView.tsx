@@ -145,22 +145,22 @@ export default function DayView({ currentDate, events, onDrop, onDragOver, onTog
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#212128] rounded-xl p-4 overflow-hidden">
+    <div className="flex-1 flex flex-col h-full bg-[var(--shell-panel)] rounded-xl p-4 overflow-hidden">
       {/* Day header */}
-      <div className={`text-center py-2 mb-2 ${isToday ? 'text-[#D4A853]' : 'text-white'}`}>
-        <div className="text-sm text-[#6B7280]">{year}年{month}月 · 星期{dayOfWeek}</div>
+      <div className={`text-center py-2 mb-2 ${isToday ? 'text-[var(--shell-accent)]' : 'text-[var(--shell-text-strong)]'}`}>
+        <div className="text-sm text-[var(--shell-subtle)]">{year}年{month}月 · 星期{dayOfWeek}</div>
         <div className="flex items-center justify-center gap-2">
-          <div className={`text-3xl font-bold ${isToday ? 'text-[#D4A853]' : 'text-white'}`}>{day}</div>
+          <div className={`text-3xl font-bold ${isToday ? 'text-[var(--shell-accent)]' : 'text-[var(--shell-text-strong)]'}`}>{day}</div>
           {hasNote && (
-            <span className="text-xs leading-none px-1.5 py-1 rounded bg-[#D4A853] text-black">有笔记</span>
+            <span className="text-xs leading-none px-1.5 py-1 rounded bg-[var(--shell-accent)] text-[var(--shell-accent-contrast)]">有笔记</span>
           )}
         </div>
-        <div className="text-sm text-[#6B7280]">农历{lunarDate}</div>
+        <div className="text-sm text-[var(--shell-subtle)]">农历{lunarDate}</div>
       </div>
 
       {/* Untimed events */}
       <div
-        className="mb-3 space-y-1 flex-shrink-0 rounded-lg border border-dashed border-[#2E2E36] p-2"
+        className="mb-3 space-y-1 flex-shrink-0 rounded-lg border border-dashed border-[var(--shell-border-subtle)] p-2"
         onDragOver={(e) => {
           e.preventDefault();
           onDragOver(e);
@@ -184,15 +184,15 @@ export default function DayView({ currentDate, events, onDrop, onDragOver, onTog
             onDragEnd={handleEventDragEnd}
             onClick={() => onToggleComplete(event.id)}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer transition-all
-              ${event.completed ? 'opacity-50 line-through' : 'opacity-100'} hover:bg-[#2A2A32]`}
+              ${event.completed ? 'opacity-50 line-through' : 'opacity-100'} hover:bg-[var(--shell-surface-hover)]`}
           >
             <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: event.color }} />
-            <span className="text-white text-sm flex-1">{event.title}</span>
+            <span className="text-[var(--shell-text-strong)] text-sm flex-1">{event.title}</span>
             {event.completed && <Check className="w-4 h-4 text-[#10B981]" strokeWidth={3} />}
           </div>
         ))}
         {untimedEvents.length === 0 && (
-          <div className="px-1 py-1 text-xs text-[#6B7280]">
+          <div className="px-1 py-1 text-xs text-[var(--shell-subtle)]">
             无明确时间任务（可从时间轴拖拽到此）
           </div>
         )}
@@ -254,7 +254,7 @@ export default function DayView({ currentDate, events, onDrop, onDragOver, onTog
             className="absolute left-[52px] right-0 z-20 pointer-events-none"
             style={{ top: dragOverSlot * SLOT_HEIGHT }}
           >
-            <div className="h-0.5 bg-[#D4A853] shadow-[0_0_6px_rgba(212,168,83,0.6)]" />
+            <div className="h-0.5 bg-[var(--shell-accent)] shadow-[0_0_6px_var(--shell-accent-glow)]" />
           </div>
         )}
 
@@ -270,19 +270,21 @@ export default function DayView({ currentDate, events, onDrop, onDragOver, onTog
                 className={`
                   flex items-start relative
                   transition-colors duration-150
-                  ${isDragTarget ? 'bg-[#D4A853]/5' : ''}
+                  ${isDragTarget ? 'bg-[var(--shell-accent-soft)]' : ''}
                 `}
                 style={{ height: SLOT_HEIGHT }}
               >
                 {/* Time label */}
                 <div className="w-12 text-right pr-2 flex-shrink-0 pt-0.5">
-                  <span className={`text-xs ${isHourMark ? 'text-[#9CA3AF]' : 'text-[#4B5563]'}`}>
+                  <span className={`text-xs ${isHourMark ? 'text-[var(--shell-text-muted)]' : 'text-[var(--shell-faint)]'}`}>
                     {slot.label}
                   </span>
                 </div>
 
                 {/* Grid line */}
-                <div className={`flex-1 ${isHourMark ? 'border-t border-[#2E2E36]' : 'border-t border-dashed border-[#2E2E36]/30'}`} />
+                <div
+                  className={`flex-1 ${isHourMark ? 'border-t border-[var(--shell-border-subtle)]' : 'border-t border-dashed border-[var(--shell-border-subtle)] opacity-40'}`}
+                />
               </div>
             );
           })}

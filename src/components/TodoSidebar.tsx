@@ -130,32 +130,32 @@ export default function TodoSidebar({
       : filteredTodos.filter((todo) => todo.category === categoryFilter);
 
   return (
-    <div className="w-[320px] flex-shrink-0 flex flex-col h-full bg-[#212128] rounded-xl p-4">
+    <div className="w-[320px] flex-shrink-0 flex flex-col h-full bg-[var(--shell-panel)] rounded-xl p-4">
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
-        <h1 className="text-2xl font-bold text-white">Todo</h1>
+        <h1 className="text-2xl font-bold text-[var(--shell-text-strong)]">Todo</h1>
         <div className="flex items-center gap-2 relative">
           <button
             onClick={() => setIsAdding(!isAdding)}
-            className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[#2A2A32] transition-colors duration-200"
+            className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[var(--shell-surface-hover)] transition-colors duration-200"
           >
-            <Plus className="w-5 h-5 text-white" />
+            <Plus className="w-5 h-5 text-[var(--shell-icon)]" />
           </button>
           <button
             onClick={() => setShowActionsMenu((prev) => !prev)}
-            className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[#2A2A32] transition-colors duration-200"
+            className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[var(--shell-surface-hover)] transition-colors duration-200"
             title="更多操作"
           >
-            <Settings className="w-5 h-5 text-white" />
+            <Settings className="w-5 h-5 text-[var(--shell-icon)]" />
           </button>
           {showActionsMenu && (
-            <div className="absolute right-0 top-10 z-50 w-44 rounded-lg border border-[#2E2E36] bg-[#1A1A1F] p-1 shadow-xl">
+            <div className="absolute right-0 top-10 z-50 w-44 rounded-lg border border-[var(--shell-border-subtle)] bg-[var(--shell-menu-bg)] p-1 shadow-xl">
               <button
                 onClick={() => {
                   onExportData();
                   setShowActionsMenu(false);
                 }}
-                className="w-full text-left px-3 py-2 text-xs rounded-md text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors"
+                className="w-full text-left px-3 py-2 text-xs rounded-md text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] transition-colors"
               >
                 导出数据
               </button>
@@ -164,7 +164,7 @@ export default function TodoSidebar({
                   importInputRef.current?.click();
                   setShowActionsMenu(false);
                 }}
-                className="w-full text-left px-3 py-2 text-xs rounded-md text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors"
+                className="w-full text-left px-3 py-2 text-xs rounded-md text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] transition-colors"
               >
                 导入数据
               </button>
@@ -173,7 +173,7 @@ export default function TodoSidebar({
                   onTestNotification();
                   setShowActionsMenu(false);
                 }}
-                className="w-full text-left px-3 py-2 text-xs rounded-md text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors"
+                className="w-full text-left px-3 py-2 text-xs rounded-md text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] transition-colors"
               >
                 测试通知
               </button>
@@ -182,7 +182,7 @@ export default function TodoSidebar({
                   onResetLocalData();
                   setShowActionsMenu(false);
                 }}
-                className="w-full text-left px-3 py-2 text-xs rounded-md text-[#EF4444] hover:bg-[#2A2A32] transition-colors"
+                className="w-full text-left px-3 py-2 text-xs rounded-md text-[#EF4444] hover:bg-[var(--shell-surface-hover)] transition-colors"
               >
                 清空本地 / 恢复默认
               </button>
@@ -192,15 +192,15 @@ export default function TodoSidebar({
       </div>
 
       {/* View subtitle */}
-      <div className="text-sm text-[#6B7280] mb-3">{getSubtitle()}</div>
+      <div className="text-sm text-[var(--shell-subtle)] mb-3">{getSubtitle()}</div>
 
       <div className="flex flex-wrap gap-2 mb-3">
         <button
           onClick={() => setCategoryFilter('all')}
           className={`px-2 py-1 text-xs rounded-md border transition-colors ${
             categoryFilter === 'all'
-              ? 'border-[#D4A853] text-[#D4A853]'
-              : 'border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32]'
+              ? 'border-[var(--shell-accent)] text-[var(--shell-accent)]'
+              : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
           }`}
         >
           全部
@@ -211,8 +211,8 @@ export default function TodoSidebar({
             onClick={() => setCategoryFilter(item.value)}
             className={`px-2 py-1 text-xs rounded-md border transition-colors ${
               categoryFilter === item.value
-                ? 'border-[#D4A853] text-[#D4A853]'
-                : 'border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32]'
+                ? 'border-[var(--shell-accent)] text-[var(--shell-accent)]'
+                : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
             }`}
           >
             {item.label}
@@ -229,14 +229,14 @@ export default function TodoSidebar({
             onChange={(e) => setNewTodoText(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && addTodo()}
             placeholder="输入新任务..."
-            className="w-full px-3 py-2 bg-[#1A1A1F] border border-[#2E2E36] rounded-lg text-white text-sm placeholder-[#6B7280] focus:outline-none focus:border-[#D4A853]"
+            className="w-full px-3 py-2 bg-[var(--shell-input-bg)] border border-[var(--shell-border-subtle)] rounded-lg text-[var(--shell-text-strong)] text-sm placeholder-[var(--shell-placeholder)] focus:outline-none focus:border-[var(--shell-accent)]"
             autoFocus
           />
           <div className="flex gap-2 mt-2">
             <select
               value={newTodoCategory}
               onChange={(e) => setNewTodoCategory(e.target.value as TodoCategory)}
-              className="px-2 py-1 bg-[#1A1A1F] border border-[#2E2E36] rounded-md text-[#9CA3AF] text-xs focus:outline-none"
+              className="px-2 py-1 bg-[var(--shell-input-bg)] border border-[var(--shell-border-subtle)] rounded-md text-[var(--shell-text-muted)] text-xs focus:outline-none"
             >
               {CATEGORY_OPTIONS.map((item) => (
                 <option key={item.value} value={item.value}>
@@ -246,13 +246,13 @@ export default function TodoSidebar({
             </select>
             <button
               onClick={addTodo}
-              className="px-3 py-1 bg-[#D4A853] text-black text-xs font-medium rounded-md hover:bg-[#C49A4A] transition-colors"
+              className="px-3 py-1 bg-[var(--shell-accent)] text-[var(--shell-accent-contrast)] text-xs font-medium rounded-md hover:bg-[var(--shell-accent-hover)] transition-colors"
             >
               添加
             </button>
             <button
               onClick={() => setIsAdding(false)}
-              className="px-3 py-1 bg-[#2E2E36] text-[#9CA3AF] text-xs rounded-md hover:bg-[#3A3A44] transition-colors"
+              className="px-3 py-1 bg-[var(--shell-btn-secondary-bg)] text-[var(--shell-text-muted)] text-xs rounded-md hover:bg-[var(--shell-btn-secondary-hover)] transition-colors"
             >
               取消
             </button>
@@ -263,7 +263,7 @@ export default function TodoSidebar({
       {/* Todo List - filtered by view */}
       <div className="flex-1 overflow-y-auto">
         {visibleTodos.length === 0 && (
-          <p className="text-sm text-[#6B7280] text-center py-8">{getEmptyText()}</p>
+          <p className="text-sm text-[var(--shell-subtle)] text-center py-8">{getEmptyText()}</p>
         )}
         {visibleTodos.map((todo) => (
           (() => {
@@ -284,7 +284,7 @@ export default function TodoSidebar({
           >
             <span
               className="w-2 h-2 rounded-full flex-shrink-0 mt-2"
-              style={{ backgroundColor: canDrag || isEmptyCount ? todo.color : '#4B5563' }}
+              style={{ backgroundColor: canDrag || isEmptyCount ? todo.color : 'var(--shell-faint)' }}
             />
             {editingTodoId === todo.id ? (
               <div className="flex-1 flex items-center gap-1">
@@ -296,13 +296,13 @@ export default function TodoSidebar({
                     if (e.key === 'Enter') saveEditTodo();
                     if (e.key === 'Escape') cancelEditTodo();
                   }}
-                  className="w-full px-2 py-1 bg-[#1A1A1F] border border-[#2E2E36] rounded text-white text-sm focus:outline-none focus:border-[#D4A853]"
+                  className="w-full px-2 py-1 bg-[var(--shell-input-bg)] border border-[var(--shell-border-subtle)] rounded text-[var(--shell-text-strong)] text-sm focus:outline-none focus:border-[var(--shell-accent)]"
                   autoFocus
                 />
                 <select
                   value={editingCategory}
                   onChange={(e) => setEditingCategory(e.target.value as TodoCategory)}
-                  className="px-2 py-1 bg-[#1A1A1F] border border-[#2E2E36] rounded text-[#9CA3AF] text-xs focus:outline-none"
+                  className="px-2 py-1 bg-[var(--shell-input-bg)] border border-[var(--shell-border-subtle)] rounded text-[var(--shell-text-muted)] text-xs focus:outline-none"
                 >
                   {CATEGORY_OPTIONS.map((item) => (
                     <option key={item.value} value={item.value}>
@@ -312,21 +312,21 @@ export default function TodoSidebar({
                 </select>
                 <button
                   onClick={saveEditTodo}
-                  className="p-1 rounded hover:bg-[#2A2A32]"
+                  className="p-1 rounded hover:bg-[var(--shell-surface-hover)]"
                   title="保存"
                 >
                   <Check className="w-4 h-4 text-[#10B981]" />
                 </button>
                 <button
                   onClick={cancelEditTodo}
-                  className="p-1 rounded hover:bg-[#2A2A32]"
+                  className="p-1 rounded hover:bg-[var(--shell-surface-hover)]"
                   title="取消"
                 >
-                  <X className="w-4 h-4 text-[#9CA3AF]" />
+                  <X className="w-4 h-4 text-[var(--shell-text-muted)]" />
                 </button>
               </div>
             ) : (
-              <span className={`text-[15px] leading-relaxed flex-1 ${canDrag || isEmptyCount ? 'text-white' : 'text-[#6B7280] line-through'}`}>
+              <span className={`text-[15px] leading-relaxed flex-1 ${canDrag || isEmptyCount ? 'text-[var(--shell-text-strong)]' : 'text-[var(--shell-subtle)] line-through'}`}>
                 {todo.text}
               </span>
             )}
@@ -334,12 +334,12 @@ export default function TodoSidebar({
             <span className={`
               text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0
               ${isEmptyCount
-                ? 'bg-[#2E2E36] text-transparent'
+                ? 'bg-[var(--shell-disabled-bg)] text-transparent'
                 : count > 1
-                ? 'bg-[#D4A853] text-black'
+                ? 'bg-[var(--shell-accent)] text-[var(--shell-accent-contrast)]'
                 : count === 1
-                  ? 'bg-[#2E2E36] text-[#9CA3AF]'
-                  : 'bg-[#2E2E36] text-[#4B5563]'
+                  ? 'bg-[var(--shell-disabled-bg)] text-[var(--shell-text-muted)]'
+                  : 'bg-[var(--shell-disabled-bg)] text-[var(--shell-faint)]'
               }
             `}>
               {isEmptyCount ? 'x' : `x${count}`}
@@ -348,14 +348,14 @@ export default function TodoSidebar({
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button
                   onClick={() => startEditTodo(todo)}
-                  className="p-1 rounded hover:bg-[#2A2A32]"
+                  className="p-1 rounded hover:bg-[var(--shell-surface-hover)]"
                   title="编辑任务"
                 >
-                  <Pencil className="w-3.5 h-3.5 text-[#9CA3AF]" />
+                  <Pencil className="w-3.5 h-3.5 text-[var(--shell-text-muted)]" />
                 </button>
                 <button
                   onClick={() => confirmDeleteTodo(todo)}
-                  className="p-1 rounded hover:bg-[#2A2A32]"
+                  className="p-1 rounded hover:bg-[var(--shell-surface-hover)]"
                   title="删除任务"
                 >
                   <Trash2 className="w-3.5 h-3.5 text-[#EF4444]" />
@@ -369,8 +369,8 @@ export default function TodoSidebar({
       </div>
 
       {/* Footer Tip */}
-      <div className="mt-4 pt-4 border-t border-[#2E2E36]">
-        <p className="text-[13px] text-[#6B7280]">按住圆点可拖动到右侧日历规划日程</p>
+      <div className="mt-4 pt-4 border-t border-[var(--shell-border-subtle)]">
+        <p className="text-[13px] text-[var(--shell-subtle)]">按住圆点可拖动到右侧日历规划日程</p>
         <input
           ref={importInputRef}
           type="file"
@@ -384,18 +384,18 @@ export default function TodoSidebar({
         />
       </div>
 
-      <div className="mt-4 pt-4 border-t border-[#2E2E36]">
-        <div className="text-sm text-white mb-2">笔记（{noteDateKey}）</div>
+      <div className="mt-4 pt-4 border-t border-[var(--shell-border-subtle)]">
+        <div className="text-sm text-[var(--shell-text-strong)] mb-2">笔记（{noteDateKey}）</div>
         <textarea
           value={noteDraft}
           onChange={(e) => setNoteDraft(e.target.value)}
           placeholder="写下今天的工作日记、笔记或感悟..."
-          className="w-full min-h-[92px] px-3 py-2 bg-[#1A1A1F] border border-[#2E2E36] rounded-lg text-white text-sm placeholder-[#6B7280] focus:outline-none focus:border-[#D4A853] resize-y"
+          className="w-full min-h-[92px] px-3 py-2 bg-[var(--shell-input-bg)] border border-[var(--shell-border-subtle)] rounded-lg text-[var(--shell-text-strong)] text-sm placeholder-[var(--shell-placeholder)] focus:outline-none focus:border-[var(--shell-accent)] resize-y"
         />
         <div className="mt-2 flex gap-2">
           <button
             onClick={() => onSaveNote(noteDateKey, noteDraft)}
-            className="flex-1 px-3 py-2 text-xs rounded-md bg-[#D4A853] text-black font-medium hover:bg-[#C49A4A] transition-colors"
+            className="flex-1 px-3 py-2 text-xs rounded-md bg-[var(--shell-accent)] text-[var(--shell-accent-contrast)] font-medium hover:bg-[var(--shell-accent-hover)] transition-colors"
           >
             保存笔记
           </button>
@@ -404,7 +404,7 @@ export default function TodoSidebar({
               setNoteDraft('');
               onSaveNote(noteDateKey, '');
             }}
-            className="flex-1 px-3 py-2 text-xs rounded-md border border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors"
+            className="flex-1 px-3 py-2 text-xs rounded-md border border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] transition-colors"
           >
             清空笔记
           </button>

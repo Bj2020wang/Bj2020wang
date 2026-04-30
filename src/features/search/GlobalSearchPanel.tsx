@@ -78,7 +78,7 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate, onAdd
         {parts.map((part, index) => {
           if (part.toLowerCase() === q.toLowerCase()) {
             return (
-              <mark key={`${part}-${index}`} className="bg-[#D4A853]/30 text-[#FCD34D] rounded px-0.5">
+              <mark key={`${part}-${index}`} className="rounded px-0.5 bg-[var(--shell-mark-bg)] text-[var(--shell-mark-text)]">
                 {part}
               </mark>
             );
@@ -262,48 +262,48 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate, onAdd
 
   return (
     <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4">
-      <div className="flex h-[min(85vh,40rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-[#2E2E36] bg-[#1A1A1F] shadow-2xl">
-        <div className="flex flex-shrink-0 items-center justify-between px-4 py-3 border-b border-[#2E2E36]">
+      <div className="flex h-[min(85vh,40rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] shadow-2xl">
+        <div className="flex flex-shrink-0 items-center justify-between px-4 py-3 border-b border-[var(--shell-border-subtle)]">
           <div>
-            <h2 className="text-lg text-white font-semibold">全局关键词搜索</h2>
-            <p className="text-xs text-[#9CA3AF] mt-1">在所有日历事件中按关键词搜索，并显示具体日期时间（默认不限日期）</p>
+            <h2 className="text-lg text-[var(--shell-text-strong)] font-semibold">全局关键词搜索</h2>
+            <p className="text-xs text-[var(--shell-text-muted)] mt-1">在所有日历事件中按关键词搜索，并显示具体日期时间（默认不限日期）</p>
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-lg hover:bg-[#2A2A32] flex items-center justify-center"
+            className="w-8 h-8 rounded-lg hover:bg-[var(--shell-surface-hover)] flex items-center justify-center"
             title="关闭搜索"
           >
-            <X className="w-4 h-4 text-[#9CA3AF]" />
+            <X className="w-4 h-4 text-[var(--shell-text-muted)]" />
           </button>
         </div>
 
-        <div className="flex-shrink-0 px-4 py-3 border-b border-[#2E2E36]">
+        <div className="flex-shrink-0 px-4 py-3 border-b border-[var(--shell-border-subtle)]">
           <input
             type="text"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             placeholder="输入关键词（如：走访企业）"
-            className="w-full px-3 py-2 bg-[#111115] border border-[#2E2E36] rounded-lg text-sm text-white placeholder-[#6B7280] focus:outline-none focus:border-[#D4A853]"
+            className="w-full px-3 py-2 bg-[var(--shell-input-deep)] border border-[var(--shell-border-subtle)] rounded-lg text-sm text-[var(--shell-text-strong)] placeholder-[var(--shell-placeholder)] focus:outline-none focus:border-[var(--shell-accent)]"
           />
           <button
             onClick={() => setShowIncompleteOnly((prev) => !prev)}
             className={`mt-2 px-3 py-2 text-xs rounded-md border transition-colors ${
               showIncompleteOnly
-                ? 'border-[#D4A853] text-[#D4A853]'
-                : 'border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32]'
+                ? 'border-[var(--shell-accent)] text-[var(--shell-accent)]'
+                : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
             }`}
           >
             {showIncompleteOnly ? '仅看未完成：已开启' : '仅看未完成：已关闭'}
           </button>
           <button
             onClick={handleExportCsv}
-            className="mt-2 ml-2 px-3 py-2 text-xs rounded-md border border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors"
+            className="mt-2 ml-2 px-3 py-2 text-xs rounded-md border border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] transition-colors"
           >
             导出当前结果 CSV
           </button>
           <button
             onClick={handleExportBriefTxt}
-            className="mt-2 ml-2 px-3 py-2 text-xs rounded-md border border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors"
+            className="mt-2 ml-2 px-3 py-2 text-xs rounded-md border border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] transition-colors"
           >
             导出简报 TXT
           </button>
@@ -312,18 +312,18 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate, onAdd
               {topQueries.map((query) => (
                 <span
                   key={query}
-                  className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border border-[#3E3E48] text-[#9CA3AF]"
+                  className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border border-[var(--shell-border)] text-[var(--shell-text-muted)]"
                 >
                   <button
                     onClick={() => setKeyword(query)}
-                    className="hover:text-white transition-colors"
+                    className="hover:text-[var(--shell-text-strong)] transition-colors"
                     title="点击搜索该关键词"
                   >
                     {query}
                   </button>
                   <button
                     onClick={() => handleRemoveQuery(query)}
-                    className="text-[#6B7280] hover:text-[#EF4444] transition-colors"
+                    className="text-[var(--shell-subtle)] hover:text-[#EF4444] transition-colors"
                     title="删除该关键词"
                   >
                     ×
@@ -332,38 +332,38 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate, onAdd
               ))}
               <button
                 onClick={handleClearQueries}
-                className="px-2 py-1 text-xs rounded-md border border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors"
+                className="px-2 py-1 text-xs rounded-md border border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] transition-colors"
               >
                 清空常用
               </button>
             </div>
           )}
           <div className="mt-3 grid grid-cols-4 gap-2">
-            <div className="rounded-md border border-[#2E2E36] bg-[#111115] px-3 py-2">
-              <div className="text-[11px] text-[#6B7280]">命中总数</div>
-              <div className="text-sm font-semibold text-white">{resultStats.total}</div>
+            <div className="rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)] px-3 py-2">
+              <div className="text-[11px] text-[var(--shell-subtle)]">命中总数</div>
+              <div className="text-sm font-semibold text-[var(--shell-text-strong)]">{resultStats.total}</div>
             </div>
-            <div className="rounded-md border border-[#2E2E36] bg-[#111115] px-3 py-2">
-              <div className="text-[11px] text-[#6B7280]">未完成数</div>
-              <div className="text-sm font-semibold text-[#D4A853]">{resultStats.incomplete}</div>
+            <div className="rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)] px-3 py-2">
+              <div className="text-[11px] text-[var(--shell-subtle)]">未完成数</div>
+              <div className="text-sm font-semibold text-[var(--shell-accent)]">{resultStats.incomplete}</div>
             </div>
-            <div className="rounded-md border border-[#2E2E36] bg-[#111115] px-3 py-2">
-              <div className="text-[11px] text-[#6B7280]">有具体时间</div>
+            <div className="rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)] px-3 py-2">
+              <div className="text-[11px] text-[var(--shell-subtle)]">有具体时间</div>
               <div className="text-sm font-semibold text-[#10B981]">{resultStats.withTime}</div>
             </div>
-            <div className="rounded-md border border-[#2E2E36] bg-[#111115] px-3 py-2">
-              <div className="text-[11px] text-[#6B7280]">完成率</div>
+            <div className="rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)] px-3 py-2">
+              <div className="text-[11px] text-[var(--shell-subtle)]">完成率</div>
               <div className="text-sm font-semibold text-[#60A5FA]">{resultStats.completionRate}%</div>
             </div>
           </div>
           {!!keyword.trim() && monthlyDistribution.length > 0 && (
-            <div className="mt-2 rounded-md border border-[#2E2E36] bg-[#111115] px-3 py-2">
-              <div className="text-[11px] text-[#6B7280] mb-1">按月命中分布（最近 6 个月）</div>
+            <div className="mt-2 rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)] px-3 py-2">
+              <div className="text-[11px] text-[var(--shell-subtle)] mb-1">按月命中分布（最近 6 个月）</div>
               <div className="flex flex-wrap gap-2">
                 {monthlyDistribution.map(([month, count]) => (
                   <span
                     key={month}
-                    className="px-2 py-1 text-xs rounded-md border border-[#3E3E48] text-[#9CA3AF]"
+                    className="px-2 py-1 text-xs rounded-md border border-[var(--shell-border)] text-[var(--shell-text-muted)]"
                   >
                     {month}: {count}
                   </span>
@@ -375,36 +375,36 @@ export default function GlobalSearchPanel({ events, onClose, onJumpToDate, onAdd
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           {!keyword.trim() && (
-            <p className="text-sm text-[#6B7280] py-8 text-center">输入关键词即可搜索全部历史事件</p>
+            <p className="text-sm text-[var(--shell-subtle)] py-8 text-center">输入关键词即可搜索全部历史事件</p>
           )}
           {!!keyword.trim() && results.length === 0 && (
-            <p className="text-sm text-[#6B7280] py-8 text-center">没有命中结果，请换个关键词试试</p>
+            <p className="text-sm text-[var(--shell-subtle)] py-8 text-center">没有命中结果，请换个关键词试试</p>
           )}
           {results.map((item) => (
             <button
               key={item.id}
               onClick={() => onJumpToDate(item.date)}
-              className="w-full text-left mb-2 px-3 py-2 rounded-lg border border-[#2E2E36] hover:bg-[#23232B] transition-colors"
+              className="w-full text-left mb-2 px-3 py-2 rounded-lg border border-[var(--shell-border-subtle)] hover:bg-[var(--shell-list-hover)] transition-colors"
             >
               <div className="flex items-center justify-between gap-3">
-                <div className="text-sm text-white font-medium">{renderHighlightedTitle(item.title)}</div>
+                <div className="text-sm text-[var(--shell-text-strong)] font-medium">{renderHighlightedTitle(item.title)}</div>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       onAddToTodayPlan(item.title);
                     }}
-                    className="px-2 py-1 text-[11px] rounded-md border border-[#3E3E48] text-[#9CA3AF] hover:bg-[#2A2A32] transition-colors"
+                    className="px-2 py-1 text-[11px] rounded-md border border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] transition-colors"
                     title="加入今日计划"
                   >
                     加入今日计划
                   </button>
-                  <div className={`text-xs ${item.completed ? 'text-[#10B981]' : 'text-[#D4A853]'}`}>
+                  <div className={`text-xs ${item.completed ? 'text-[#10B981]' : 'text-[var(--shell-accent)]'}`}>
                     {item.completed ? '已完成' : '未完成'}
                   </div>
                 </div>
               </div>
-              <div className="text-xs text-[#9CA3AF] mt-1">
+              <div className="text-xs text-[var(--shell-text-muted)] mt-1">
                 时间：{item.date} {item.time ?? '无具体时刻'}
               </div>
             </button>
