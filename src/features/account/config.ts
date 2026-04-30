@@ -1,6 +1,5 @@
-/** CloudBase 环境 ID（可在 .env 中用 VITE_CLOUDBASE_ENV_ID 覆盖） */
-export const CLOUDBASE_ENV_ID =
-  import.meta.env.VITE_CLOUDBASE_ENV_ID ?? 'cloudbase-prepaid-2ewaac0459784f';
+/** CloudBase 环境 ID（必须在 .env 中配置 VITE_CLOUDBASE_ENV_ID） */
+export const CLOUDBASE_ENV_ID = import.meta.env.VITE_CLOUDBASE_ENV_ID?.trim() ?? '';
 
 /** 与云开发环境地域一致（HTTP 域名一般为 *.ap-shanghai.app.tcloudbase.com） */
 export const CLOUDBASE_REGION = import.meta.env.VITE_CLOUDBASE_REGION ?? 'ap-shanghai';

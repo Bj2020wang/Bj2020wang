@@ -7,6 +7,11 @@ type CloudbaseApp = ReturnType<typeof cloudbase.init>;
 let app: CloudbaseApp | null = null;
 
 function buildInitOptions(): Parameters<typeof cloudbase.init>[0] {
+  if (!CLOUDBASE_ENV_ID) {
+    throw new Error(
+      'CloudBase 环境未配置：请在项目 .env 文件中设置 VITE_CLOUDBASE_ENV_ID（例如 cloudbase-xxxx）。'
+    );
+  }
   const opts: Parameters<typeof cloudbase.init>[0] = {
     env: CLOUDBASE_ENV_ID,
     region: CLOUDBASE_REGION,
