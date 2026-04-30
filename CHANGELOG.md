@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.5
+
+- 账号与快照：云函数 `newworld` 混合同步（`dbAuthUid`、自定义登录票据、pull/push）；前端 `AccountAuthProvider` 统一登录态；`App` 防抖自动 push；`watch` 不可用时以 `pull` 轮询兜底。
+- 文档与协作规则：`PROJECT_GUIDE.md`、`.cursorrules` 同步架构说明。
+- Windows 安装包：在本机已配置 VS Build Tools 的前提下执行 `scripts\release.ps1`（需当前 `HEAD` 已打并推送标签 `v0.1.5`），生成后复制到 `release/v0.1.5/`；仓库中可保留历史版本安装包目录（如 `v0.1.3`）便于分发。
+
 ## v0.1.4
 
 - Added CloudBase backend dependencies for account-system integration experiments.
