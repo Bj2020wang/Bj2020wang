@@ -166,12 +166,15 @@ export function restoreSnapshotHistory(token: string, historyId: string) {
   });
 }
 
+export type TeamPeerAccess = 'bothPush' | 'peerReadOnly' | 'peerReadAllWriteOwn';
+
 export function teamCreate(token: string, name?: string) {
   return postAccountAction<{
     teamId: string;
     name: string;
     members: string[];
     peerReadOnly?: boolean;
+    peerAccess?: TeamPeerAccess;
   }>({
     action: 'team-create',
     payload: { token, name },
@@ -185,6 +188,7 @@ export function teamJoin(token: string, teamId: string) {
     members: string[];
     alreadyMember?: boolean;
     peerReadOnly?: boolean;
+    peerAccess?: TeamPeerAccess;
     ownerEmail?: string | null;
   }>({
     action: 'team-join',
@@ -211,6 +215,7 @@ export function teamGet(token: string, teamId: string) {
     members: string[];
     ownerEmail?: string | null;
     peerReadOnly?: boolean;
+    peerAccess?: TeamPeerAccess;
     version: number;
     updatedAt?: number | null;
   }>({
@@ -226,6 +231,7 @@ export function teamPull(token: string, teamId: string) {
     members: string[];
     ownerEmail?: string | null;
     peerReadOnly?: boolean;
+    peerAccess?: TeamPeerAccess;
     snapshot: unknown;
     updatedAt?: number | null;
     version: number;
@@ -263,8 +269,15 @@ export function teamPush(
 }
 
 export function teamSetPeerReadOnly(token: string, teamId: string, peerReadOnly: boolean) {
-  return postAccountAction<{ teamId: string; peerReadOnly: boolean }>({
+  return postAccountAction<{ teamId: string; peerReadOnly: boolean; peerAccess?: TeamPeerAccess }>({
     action: 'team-set-peer-read-only',
     payload: { token, teamId, peerReadOnly },
+  });
+}
+
+export function teamSetPeerAccess(token: string, teamId: string, peerAccess: TeamPeerAccess) {
+  return postAccountAction<{ teamId: string; peerAccess: TeamPeerAccess; peerReadOnly: boolean }>({
+    action: 'team-set-peer-access',
+    payload: { token, teamId, peerAccess },
   });
 }

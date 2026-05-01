@@ -213,7 +213,7 @@
 | 顶部「账号」 | `src/App.tsx` | `setShowAccountLogin(true)` | 打开 `AccountLoginModal` |
 | 发送验证码 | `src/features/account/AccountLoginModal.tsx` | `handleSend()` | `useSharedAccountAuth().sendCode()` -> `authApi.sendCode()` -> `/test` `action=send-code` |
 | 验证并登录 | `src/features/account/AccountLoginModal.tsx` | `handleVerify()` | `verify()` 成功后 **自动拉取**：个人云 `pullSnapshot` + `onPullSnapshot` 并写 **`todo-calendar-first-pull-done`**；协作云 **`team-pull`** + `onTeamCloudPulled`；协作自动拉取失败时提示 **必须手动拉** |
-| 退出业务登录 | `AccountLoginModal.tsx` | `handleLogout()` | 先尝试 **推送**（个人 `pushSnapshot` / 协作 `teamPush`）；成功 **alert 已同步** 后 `logout()`；失败 **`confirm` 是否仍退出**（取消则保留登录） |
+| 退出业务登录 | `AccountLoginModal.tsx` | `executeLogout(clearLocal)` | 点「退出业务登录」后先选：**退出并清空本机日历数据** 或 **仅退出账号，保留本地数据**（可取消）。再 **尝试推送**（个人 `pushSnapshot` / 协作 `teamPush`）；成功 **alert 已同步** 后 `logout()`；失败 **`confirm` 是否仍退出**。若选清空，登出后 **`App.tsx` `handleAfterLogout`** 会删 `todo-calendar-local-v1`、协作/工作区相关 `localStorage` 键并重置界面为默认日历数据 |
 | 匿名登录（自动） | `src/features/account/cloudbase.ts` | `ensureAnonymousSignIn()` | CloudBase `auth.signInAnonymously()` |
 | 取访问令牌（自动） | `src/features/account/cloudbase.ts` | `getCloudbaseAccessToken()` | CloudBase `auth.getAccessToken()` |
 | 推送云端 | `src/features/account/AccountLoginModal.tsx` + `src/App.tsx` | `handlePush()` + `getAccountSnapshot()`；**另：**`App.tsx` 在已登录且完成首次拉取后对本地数据变更 **防抖自动 push** | `authApi.pushSnapshot()` -> `/test` `action=push` |

@@ -3,7 +3,8 @@ import { X } from 'lucide-react';
 import { useSharedAccountAuth } from './AccountAuthContext';
 import * as authApi from './authApi';
 import { AccountSyncConflictError } from './authApi';
-import type { SnapshotHistoryItem } from './authApi';
+import type { SnapshotHistoryItem, TeamPeerAccess } from './authApi';
+import { normalizeTeamPeerAccess } from '@/lib/teamCollab';
 import { teamFirstPullDoneKey } from './config';
 import { watchUserSnapshotByEmail } from './userSnapshotDb';
 import type { UserSnapshotDocPayload } from './userSnapshotDb';
@@ -50,9 +51,11 @@ interface AccountLoginModalProps {
   onSwitchToPersonalWorkspace?: (opts?: { skipTeamFlush?: boolean }) => Promise<void>;
   onTeamCloudPulled?: (teamId: string, snapshot: unknown, version: number) => void;
   onTeamPushedVersion?: (teamId: string, version: number) => void;
-  teamPeerReadOnly?: boolean;
+  teamPeerAccess?: TeamPeerAccess;
   teamOwnerEmail?: string | null;
-  onTeamWorkspaceMeta?: (meta: { peerReadOnly: boolean; ownerEmail: string | null }) => void;
+  onTeamWorkspaceMeta?: (meta: { peerAccess: TeamPeerAccess; ownerEmail: string | null }) => void;
+  /** 业务登出完成后：若用户选择清空本机日历，由宿主清理 localStorage 与界面状态 */
+  onAfterLogout?: (opts: { clearLocalCalendar: boolean }) => void;
 }
 
 export default function AccountLoginModal({
@@ -68,9 +71,10 @@ export default function AccountLoginModal({
   onSwitchToPersonalWorkspace,
   onTeamCloudPulled,
   onTeamPushedVersion,
-  teamPeerReadOnly = false,
+  teamPeerAccess = 'bothPush',
   teamOwnerEmail = null,
   onTeamWorkspaceMeta,
+  onAfterLogout,
 }: AccountLoginModalProps) {
   const {
     businessToken,
@@ -125,6 +129,7 @@ export default function AccountLoginModal({
     return Number.isFinite(n) ? n : null;
   });
   const [pollFallbackActive, setPollFallbackActive] = useState(false);
+  const [logoutChoiceOpen, setLogoutChoiceOpen] = useState(false);
   const [teamJoinId, setTeamJoinId] = useState('');
   const [teamMembersHint, setTeamMembersHint] = useState('');
   const lastActivityAtRef = useRef(Date.now());
@@ -143,7 +148,7 @@ export default function AccountLoginModal({
   const teamPushForbidden =
     workspaceMode === 'team' &&
     !!activeTeamId &&
-    teamPeerReadOnly &&
+    teamPeerAccess === 'peerReadOnly' &&
     !!accountEmail &&
     !!teamOwnerEmail &&
     accountEmail.trim().toLowerCase() !== teamOwnerEmail.trim().toLowerCase();
@@ -151,6 +156,15 @@ export default function AccountLoginModal({
   useEffect(() => {
     baseVersionRef.current = baseVersion;
   }, [baseVersion]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setHasPulledOnce(window.localStorage.getItem(FIRST_PULL_DONE_KEY) === '1');
+  }, [businessToken]);
+
+  useEffect(() => {
+    if (!open) setLogoutChoiceOpen(false);
+  }, [open]);
 
   /** 云端 user_snapshots 变更实时合并（需验码后拿到 customLoginTicket 且控制台配置好库权限） */
   useEffect(() => {
@@ -364,7 +378,7 @@ export default function AccountLoginModal({
         if (cancelled) return;
         setTeamMembersHint((res.data?.members ?? []).join(', '));
         onTeamWorkspaceMeta?.({
-          peerReadOnly: res.data?.peerReadOnly === true,
+          peerAccess: normalizeTeamPeerAccess(res.data?.peerAccess, res.data?.peerReadOnly),
           ownerEmail: typeof res.data?.ownerEmail === 'string' ? res.data.ownerEmail : null,
         });
       })
@@ -675,7 +689,7 @@ export default function AccountLoginModal({
     }
   };
 
-  const handleSetTeamPeerReadOnly = async (nextPeerReadOnly: boolean) => {
+  const handleSetTeamPeerAccess = async (next: TeamPeerAccess) => {
     setError('');
     if (!businessToken || !activeTeamId || !isTeamOwner) {
       setError('仅创建者可修改该选项');
@@ -683,16 +697,18 @@ export default function AccountLoginModal({
     }
     setBusy(true);
     try {
-      await authApi.teamSetPeerReadOnly(businessToken, activeTeamId, nextPeerReadOnly);
+      await authApi.teamSetPeerAccess(businessToken, activeTeamId, next);
       onTeamWorkspaceMeta?.({
-        peerReadOnly: nextPeerReadOnly,
+        peerAccess: next,
         ownerEmail: teamOwnerEmail,
       });
-      setHint(
-        nextPeerReadOnly
-          ? '已设为「对方只读」：队友可拉取、不可推送到协作云端'
-          : '已设为「对方可读写」：双方均可推送到协作云端'
-      );
+      const hints: Record<TeamPeerAccess, string> = {
+        bothPush: '已设为「对方可读写」：双方均可推送到协作云端',
+        peerReadOnly: '已设为「对方只读」：队友可拉取、不可推送到协作云端',
+        peerReadAllWriteOwn:
+          '已设为「对方读全、写己」：队友可拉取全部任务，推送时仅同步本人任务与对应日程（笔记仍按云端合并）',
+      };
+      setHint(hints[next]);
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存失败');
     } finally {
@@ -749,7 +765,7 @@ export default function AccountLoginModal({
           const res = await authApi.teamPull(token, activeTeamId);
           const ver = typeof res.data?.version === 'number' ? res.data.version : 0;
           onTeamWorkspaceMeta?.({
-            peerReadOnly: res.data?.peerReadOnly === true,
+            peerAccess: normalizeTeamPeerAccess(res.data?.peerAccess, res.data?.peerReadOnly),
             ownerEmail: typeof res.data?.ownerEmail === 'string' ? res.data.ownerEmail : null,
           });
           onTeamCloudPulled?.(activeTeamId, res.data?.snapshot ?? null, ver);
@@ -809,7 +825,7 @@ export default function AccountLoginModal({
         }
         const ver = typeof res.data?.version === 'number' ? res.data.version : 0;
         onTeamWorkspaceMeta?.({
-          peerReadOnly: res.data?.peerReadOnly === true,
+          peerAccess: normalizeTeamPeerAccess(res.data?.peerAccess, res.data?.peerReadOnly),
           ownerEmail: typeof res.data?.ownerEmail === 'string' ? res.data.ownerEmail : null,
         });
         onTeamCloudPulled?.(activeTeamId, res.data?.snapshot ?? null, ver);
@@ -948,9 +964,11 @@ export default function AccountLoginModal({
   };
 
   /** 退出前尝试推送，再弹窗说明是否已同步，最后登出（不额外弹出「确认推送」以免与退出打断叠） */
-  const handleLogout = async () => {
+  const executeLogout = async (clearLocalCalendar: boolean) => {
+    setLogoutChoiceOpen(false);
     const finishLogout = () => {
       logout();
+      if (clearLocalCalendar) onAfterLogout?.({ clearLocalCalendar: true });
       setHint('');
       setCode('');
     };
@@ -1168,6 +1186,15 @@ export default function AccountLoginModal({
           {businessToken && workspaceMode === 'team' && activeTeamId && teamPushForbidden ? (
             <p className="text-xs text-amber-300">当前为「对方只读」：你可拉取协作内容；推送到协作云端仅创建者可用。</p>
           ) : null}
+          {businessToken &&
+          workspaceMode === 'team' &&
+          activeTeamId &&
+          teamPeerAccess === 'peerReadAllWriteOwn' &&
+          !isTeamOwner ? (
+            <p className="text-xs text-[var(--shell-text-muted)]">
+              「读全写己」：你可改自己名下的任务与对应日程；队友任务及挂在其下的日程仅可查看。
+            </p>
+          ) : null}
 
           {businessToken && autoPushEnabled ? (
             <p className="text-xs text-[var(--shell-text-muted)]">
@@ -1202,8 +1229,8 @@ export default function AccountLoginModal({
                     <input
                       type="radio"
                       name="team-peer-mode"
-                      checked={!teamPeerReadOnly}
-                      onChange={() => void handleSetTeamPeerReadOnly(false)}
+                      checked={teamPeerAccess === 'bothPush'}
+                      onChange={() => void handleSetTeamPeerAccess('bothPush')}
                       disabled={busy}
                     />
                     对方可读写（双方均可推送到协作云端）
@@ -1212,11 +1239,21 @@ export default function AccountLoginModal({
                     <input
                       type="radio"
                       name="team-peer-mode"
-                      checked={teamPeerReadOnly}
-                      onChange={() => void handleSetTeamPeerReadOnly(true)}
+                      checked={teamPeerAccess === 'peerReadOnly'}
+                      onChange={() => void handleSetTeamPeerAccess('peerReadOnly')}
                       disabled={busy}
                     />
                     对方只读（队友仅可拉取，不可推送）
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--shell-text-strong)]">
+                    <input
+                      type="radio"
+                      name="team-peer-mode"
+                      checked={teamPeerAccess === 'peerReadAllWriteOwn'}
+                      onChange={() => void handleSetTeamPeerAccess('peerReadAllWriteOwn')}
+                      disabled={busy}
+                    />
+                    对方可读全部、仅写自己的任务（笔记第一版不按人分权）
                   </label>
                 </div>
               ) : null}
@@ -1320,18 +1357,54 @@ export default function AccountLoginModal({
               </>
             ) : null}
             {businessToken ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  void handleLogout();
-                }}
-                className="rounded-lg border border-[var(--shell-border)] px-4 py-2 text-sm text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]"
-              >
-                退出业务登录
-              </button>
+              !logoutChoiceOpen ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setLogoutChoiceOpen(true)}
+                  className="rounded-lg border border-[var(--shell-border)] px-4 py-2 text-sm text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]"
+                >
+                  退出业务登录
+                </button>
+              ) : null
             ) : null}
           </div>
+
+          {businessToken && logoutChoiceOpen ? (
+            <div className="rounded-lg border border-[var(--shell-border-subtle)] bg-[var(--shell-elevated)] p-3">
+              <p className="mb-2 text-sm text-[var(--shell-text)]">请选择退出方式：</p>
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    void executeLogout(true);
+                  }}
+                  className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200 hover:bg-amber-500/20 disabled:opacity-50"
+                >
+                  退出并清空本机日历数据
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    void executeLogout(false);
+                  }}
+                  className="rounded-lg border border-[var(--shell-border)] px-3 py-2 text-sm text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
+                >
+                  仅退出账号，保留本地数据
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setLogoutChoiceOpen(false)}
+                  className="rounded-lg border border-[var(--shell-border)] px-3 py-2 text-sm text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           {businessToken && workspaceMode !== 'team' && historyItems.length > 0 ? (
             <div className="rounded-lg border border-[var(--shell-border-subtle)] bg-[var(--shell-elevated)] p-3">

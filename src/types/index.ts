@@ -12,6 +12,8 @@ export interface TodoItem {
   scopeStart?: string; // used for week-scope todos (week start date)
   count: number | null; // null means empty (not started yet)
   updatedAt?: number;
+  /** 协作云：任务归属邮箱；未标时视为创建者 ownerEmail */
+  collabOwnerEmail?: string;
 }
 
 export interface CalendarEvent {
@@ -26,6 +28,8 @@ export interface CalendarEvent {
   endTime?: string;
   reminderMinutes?: number[];
   updatedAt?: number;
+  /** 协作云：无 sourceTodoId 时的归属；有 sourceTodoId 时以任务归属为准 */
+  collabOwnerEmail?: string;
 }
 
 export type ViewType = 'today' | 'week' | 'month';

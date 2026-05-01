@@ -240,6 +240,8 @@ exports.main = async function (event) {
         return await handleTeamPush(payload);
       case 'team-set-peer-read-only':
         return await handleTeamSetPeerReadOnly(payload);
+      case 'team-set-peer-access':
+        return await handleTeamSetPeerAccess(payload);
       default:
         return fail(404, 404, 'unknown action');
     }
@@ -649,6 +651,147 @@ function assertTeamMember(email, doc) {
   return null;
 }
 
+/** @typedef {'bothPush'|'peerReadOnly'|'peerReadAllWriteOwn'} PeerAccess */
+
+/** @param {Record<string, any>} doc */
+function normalizePeerAccess(doc) {
+  var p = String(doc.peerAccess || '').trim();
+  if (p === 'bothPush' || p === 'peerReadOnly' || p === 'peerReadAllWriteOwn') return p;
+  if (doc.peerReadOnly === true) return 'peerReadOnly';
+  return 'bothPush';
+}
+
+/** @param {any} todo @param {string} ownerNorm */
+function effectiveTodoOwnerEmail(todo, ownerNorm) {
+  if (todo && typeof todo === 'object' && typeof todo.collabOwnerEmail === 'string') {
+    var o = normalizeEmail(todo.collabOwnerEmail);
+    if (o) return o;
+  }
+  return normalizeEmail(ownerNorm);
+}
+
+/**
+ * 校验队友在 peerReadAllWriteOwn 下的快照：非本人 Todo/事件（含墓碑）须与当前云端一致。
+ * @returns {string|null} 错误信息或 null
+ */
+function validateTeammateWriteOwnSnapshot(serverSnap, clientSnap, writerNorm, ownerNorm) {
+  if (!serverSnap || typeof serverSnap !== 'object') serverSnap = {};
+  if (!clientSnap || typeof clientSnap !== 'object') clientSnap = {};
+
+  var sTodos = Array.isArray(serverSnap.todos) ? serverSnap.todos : [];
+  var cTodos = Array.isArray(clientSnap.todos) ? clientSnap.todos : [];
+  var sTodoMap = {};
+  sTodos.forEach(function (t) {
+    if (t && t.id) sTodoMap[t.id] = t;
+  });
+  var cTodoMap = {};
+  cTodos.forEach(function (t) {
+    if (t && t.id) cTodoMap[t.id] = t;
+  });
+  var sTT = serverSnap.todoTombstones && typeof serverSnap.todoTombstones === 'object' ? serverSnap.todoTombstones : {};
+  var cTT = clientSnap.todoTombstones && typeof clientSnap.todoTombstones === 'object' ? clientSnap.todoTombstones : {};
+
+  var todoIds = {};
+  Object.keys(sTodoMap).forEach(function (id) {
+    todoIds[id] = true;
+  });
+  Object.keys(cTodoMap).forEach(function (id) {
+    todoIds[id] = true;
+  });
+  Object.keys(sTT).forEach(function (id) {
+    todoIds[id] = true;
+  });
+  Object.keys(cTT).forEach(function (id) {
+    todoIds[id] = true;
+  });
+
+  function todoOwnerForId(id) {
+    var st = sTodoMap[id];
+    var ct = cTodoMap[id];
+    var t = st || ct;
+    if (!t) return normalizeEmail(ownerNorm);
+    return effectiveTodoOwnerEmail(t, ownerNorm);
+  }
+
+  for (var tid in todoIds) {
+    if (!Object.prototype.hasOwnProperty.call(todoIds, tid)) continue;
+    var own = todoOwnerForId(tid);
+    if (own === writerNorm) continue;
+    if (JSON.stringify(cTodoMap[tid] || null) !== JSON.stringify(sTodoMap[tid] || null)) {
+      return '不能修改队友的任务';
+    }
+    var stomb = sTT[tid];
+    var ctomb = cTT[tid];
+    if (JSON.stringify(ctomb != null ? ctomb : null) !== JSON.stringify(stomb != null ? stomb : null)) {
+      return '不能修改队友任务的删除状态';
+    }
+  }
+
+  var resolveTodo = function (id) {
+    return sTodoMap[id] || cTodoMap[id];
+  };
+
+  function eventOwner(ev) {
+    if (!ev || typeof ev !== 'object') return normalizeEmail(ownerNorm);
+    if (ev.sourceTodoId) {
+      var t = resolveTodo(String(ev.sourceTodoId));
+      if (t) return effectiveTodoOwnerEmail(t, ownerNorm);
+    }
+    if (typeof ev.collabOwnerEmail === 'string') {
+      var co = normalizeEmail(ev.collabOwnerEmail);
+      if (co) return co;
+    }
+    return normalizeEmail(ownerNorm);
+  }
+
+  var sEv = Array.isArray(serverSnap.events) ? serverSnap.events : [];
+  var cEv = Array.isArray(clientSnap.events) ? clientSnap.events : [];
+  var sEvMap = {};
+  sEv.forEach(function (e) {
+    if (e && e.id) sEvMap[e.id] = e;
+  });
+  var cEvMap = {};
+  cEv.forEach(function (e) {
+    if (e && e.id) cEvMap[e.id] = e;
+  });
+  var sET = serverSnap.eventTombstones && typeof serverSnap.eventTombstones === 'object' ? serverSnap.eventTombstones : {};
+  var cET = clientSnap.eventTombstones && typeof clientSnap.eventTombstones === 'object' ? clientSnap.eventTombstones : {};
+
+  var evIds = {};
+  Object.keys(sEvMap).forEach(function (id) {
+    evIds[id] = true;
+  });
+  Object.keys(cEvMap).forEach(function (id) {
+    evIds[id] = true;
+  });
+  Object.keys(sET).forEach(function (id) {
+    evIds[id] = true;
+  });
+  Object.keys(cET).forEach(function (id) {
+    evIds[id] = true;
+  });
+
+  for (var eid in evIds) {
+    if (!Object.prototype.hasOwnProperty.call(evIds, eid)) continue;
+    var se = sEvMap[eid];
+    var ce = cEvMap[eid];
+    var ev = ce || se;
+    if (!ev) continue;
+    var eo = eventOwner(ev);
+    if (eo === writerNorm) continue;
+    if (JSON.stringify(cEvMap[eid] || null) !== JSON.stringify(sEvMap[eid] || null)) {
+      return '不能修改挂在队友任务下或归属队友的日程事件';
+    }
+    var setomb = sET[eid];
+    var cetomb = cET[eid];
+    if (JSON.stringify(cetomb != null ? cetomb : null) !== JSON.stringify(setomb != null ? setomb : null)) {
+      return '不能修改队友日程事件的删除状态';
+    }
+  }
+
+  return null;
+}
+
 async function handleTeamCreate(payload) {
   var email = await resolveEmailByToken(payload.token);
   if (!email) {
@@ -664,11 +807,18 @@ async function handleTeamCreate(payload) {
     members: [norm],
     /** false：双方可推送；true：除创建者外成员仅可拉取（只读） */
     peerReadOnly: false,
+    peerAccess: 'bothPush',
     snapshot: null,
     version: 0,
     updatedAt: Date.now(),
   });
-  return ok({ teamId: teamId, name: name, members: [norm], peerReadOnly: false });
+  return ok({
+    teamId: teamId,
+    name: name,
+    members: [norm],
+    peerReadOnly: false,
+    peerAccess: 'bothPush',
+  });
 }
 
 async function handleTeamJoin(payload) {
@@ -687,12 +837,14 @@ async function handleTeamJoin(payload) {
   var members = normalizeMemberList(doc.members);
   var norm = normalizeEmail(email);
   if (members.includes(norm)) {
+    var paJoin1 = normalizePeerAccess(doc);
     return ok({
       teamId: teamId,
       name: typeof doc.name === 'string' ? doc.name : '协作空间',
       members: members,
       alreadyMember: true,
-      peerReadOnly: doc.peerReadOnly === true,
+      peerReadOnly: paJoin1 === 'peerReadOnly',
+      peerAccess: paJoin1,
       ownerEmail: typeof doc.ownerEmail === 'string' ? doc.ownerEmail : null,
     });
   }
@@ -701,12 +853,14 @@ async function handleTeamJoin(payload) {
   }
   members.push(norm);
   await db.collection('team_snapshots').doc(doc._id).update({ members: members });
+  var paJoin2 = normalizePeerAccess(doc);
   return ok({
     teamId: teamId,
     name: typeof doc.name === 'string' ? doc.name : '协作空间',
     members: members,
     alreadyMember: false,
-    peerReadOnly: doc.peerReadOnly === true,
+    peerReadOnly: paJoin2 === 'peerReadOnly',
+    peerAccess: paJoin2,
     ownerEmail: typeof doc.ownerEmail === 'string' ? doc.ownerEmail : null,
   });
 }
@@ -762,12 +916,14 @@ async function handleTeamGet(payload) {
   var err = assertTeamMember(email, doc);
   if (err) return err;
   var members = normalizeMemberList(doc.members);
+  var paGet = normalizePeerAccess(doc);
   return ok({
     teamId: teamId,
     name: typeof doc.name === 'string' ? doc.name : '协作空间',
     members: members,
     ownerEmail: typeof doc.ownerEmail === 'string' ? doc.ownerEmail : null,
-    peerReadOnly: doc.peerReadOnly === true,
+    peerReadOnly: paGet === 'peerReadOnly',
+    peerAccess: paGet,
     version: toNumberOrNull(doc.version) != null ? doc.version : 0,
     updatedAt: typeof doc.updatedAt === 'number' ? doc.updatedAt : null,
   });
@@ -793,8 +949,43 @@ async function handleTeamSetPeerReadOnly(payload) {
   if (!ownerNorm || ownerNorm !== normalizeEmail(email)) {
     return fail(403, 403, '仅创建者可修改该选项');
   }
-  await db.collection('team_snapshots').doc(doc._id).update({ peerReadOnly: peerReadOnly });
-  return ok({ teamId: teamId, peerReadOnly: peerReadOnly });
+  var paOld = peerReadOnly ? 'peerReadOnly' : 'bothPush';
+  await db.collection('team_snapshots').doc(doc._id).update({
+    peerReadOnly: peerReadOnly,
+    peerAccess: paOld,
+  });
+  return ok({ teamId: teamId, peerReadOnly: peerReadOnly, peerAccess: paOld });
+}
+
+async function handleTeamSetPeerAccess(payload) {
+  var email = await resolveEmailByToken(payload.token);
+  if (!email) {
+    return fail(401, 401, '登录已失效，请重新验证');
+  }
+  var teamId = String(payload.teamId || '').trim();
+  if (!teamId) {
+    return fail(400, 400, 'teamId 必填');
+  }
+  var pa = String(payload.peerAccess || '').trim();
+  if (pa !== 'bothPush' && pa !== 'peerReadOnly' && pa !== 'peerReadAllWriteOwn') {
+    return fail(400, 400, 'peerAccess 无效');
+  }
+  var doc = await getTeamDocByTeamId(teamId);
+  if (!doc) {
+    return fail(404, 404, '协作空间不存在');
+  }
+  var err = assertTeamMember(email, doc);
+  if (err) return err;
+  var ownerNorm = typeof doc.ownerEmail === 'string' ? normalizeEmail(doc.ownerEmail) : '';
+  if (!ownerNorm || ownerNorm !== normalizeEmail(email)) {
+    return fail(403, 403, '仅创建者可修改该选项');
+  }
+  var pr = pa === 'peerReadOnly';
+  await db.collection('team_snapshots').doc(doc._id).update({
+    peerAccess: pa,
+    peerReadOnly: pr,
+  });
+  return ok({ teamId: teamId, peerAccess: pa, peerReadOnly: pr });
 }
 
 async function handleTeamPull(payload) {
@@ -813,12 +1004,14 @@ async function handleTeamPull(payload) {
   var err = assertTeamMember(email, doc);
   if (err) return err;
   var members = normalizeMemberList(doc.members);
+  var paPull = normalizePeerAccess(doc);
   return ok({
     teamId: teamId,
     name: typeof doc.name === 'string' ? doc.name : '协作空间',
     members: members,
     ownerEmail: typeof doc.ownerEmail === 'string' ? doc.ownerEmail : null,
-    peerReadOnly: doc.peerReadOnly === true,
+    peerReadOnly: paPull === 'peerReadOnly',
+    peerAccess: paPull,
     snapshot: doc.snapshot != null ? doc.snapshot : null,
     updatedAt: doc.updatedAt != null ? doc.updatedAt : null,
     version: toNumberOrNull(doc.version) != null ? doc.version : 0,
@@ -842,10 +1035,19 @@ async function handleTeamPush(payload) {
   }
   var err = assertTeamMember(email, docRow);
   if (err) return err;
-  if (docRow.peerReadOnly === true) {
-    var ownerNorm = typeof docRow.ownerEmail === 'string' ? normalizeEmail(docRow.ownerEmail) : '';
-    if (ownerNorm && normalizeEmail(email) !== ownerNorm) {
+  var accessPush = normalizePeerAccess(docRow);
+  if (accessPush === 'peerReadOnly') {
+    var ownerNormRo = typeof docRow.ownerEmail === 'string' ? normalizeEmail(docRow.ownerEmail) : '';
+    if (ownerNormRo && normalizeEmail(email) !== ownerNormRo) {
       return fail(403, 403, '当前为「对方只读」模式，仅创建者可推送到协作云端');
+    }
+  }
+  var ownerNormPush = typeof docRow.ownerEmail === 'string' ? normalizeEmail(docRow.ownerEmail) : '';
+  var writerNormPush = normalizeEmail(email);
+  if (accessPush === 'peerReadAllWriteOwn' && ownerNormPush && writerNormPush !== ownerNormPush) {
+    var vfMsg = validateTeammateWriteOwnSnapshot(docRow.snapshot, payload.snapshot, writerNormPush, ownerNormPush);
+    if (vfMsg) {
+      return fail(403, 403, vfMsg);
     }
   }
   var snapshot = payload.snapshot;

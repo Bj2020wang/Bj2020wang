@@ -17,6 +17,14 @@ import {
 } from '@/features/account/config';
 import type { ViewType, CalendarEvent, TodoItem, TodoCategory, TodoScopeType } from '@/types';
 import { getMonthDays, getWeekDays } from '@/lib/calendar-utils';
+import {
+  buildWriteOwnTeamSnapshot,
+  effectiveEventOwnerEmail,
+  effectiveTodoOwnerEmail,
+  normCollabEmail,
+  normalizeTeamPeerAccess,
+  type TeamPeerAccess,
+} from '@/lib/teamCollab';
 import { useEventReminders } from '@/features/notifications/useEventReminders';
 import { useAppTheme } from '@/features/theme/useAppTheme';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
@@ -44,7 +52,20 @@ const defaultEvents: CalendarEvent[] = [
 const STORAGE_KEY = 'todo-calendar-local-v1';
 /** 与 AccountLoginModal 一致：完成过至少一次「拉取云端」后才自动推送，避免覆盖云端 */
 const FIRST_PULL_DONE_KEY = 'todo-calendar-first-pull-done';
+const ACCOUNT_LAST_PULL_AT_KEY = 'todo-calendar-account-last-pull-at';
+const ACCOUNT_LAST_PUSH_AT_KEY = 'todo-calendar-account-last-push-at';
 const AUTO_PUSH_DEBOUNCE_MS = 1200;
+
+function removeLocalStorageKeysByPrefix(prefixes: string[]) {
+  if (typeof window === 'undefined') return;
+  const toRemove: string[] = [];
+  for (let i = 0; i < window.localStorage.length; i++) {
+    const k = window.localStorage.key(i);
+    if (!k) continue;
+    if (prefixes.some((p) => k.startsWith(p))) toRemove.push(k);
+  }
+  toRemove.forEach((k) => window.localStorage.removeItem(k));
+}
 
 function readWorkspaceMode(): 'personal' | 'team' {
   if (typeof window === 'undefined') return 'personal';
@@ -200,6 +221,7 @@ const TODO_COMPARE_FIELDS: Array<keyof TodoItem> = [
   'scopeType',
   'scopeStart',
   'count',
+  'collabOwnerEmail',
 ];
 
 const readEventUpdatedAt = (event: CalendarEvent): number =>
@@ -215,6 +237,7 @@ const EVENT_COMPARE_FIELDS: Array<keyof CalendarEvent> = [
   'startTime',
   'endTime',
   'reminderMinutes',
+  'collabOwnerEmail',
 ];
 
 const mergeTodoRecords = (
@@ -417,9 +440,9 @@ export default function App() {
   const [workspaceMode, setWorkspaceMode] = useState<'personal' | 'team'>(() => readWorkspaceMode());
   const [activeTeamId, setActiveTeamId] = useState<string | null>(() => readActiveTeamId());
   const [teamBaseVersion, setTeamBaseVersion] = useState<number>(() => readTeamBaseVersion(readActiveTeamId()));
-  /** true：除创建者外仅可拉取，不可推送 */
-  const [teamPeerReadOnly, setTeamPeerReadOnly] = useState(false);
+  const [teamPeerAccess, setTeamPeerAccess] = useState<TeamPeerAccess>('bothPush');
   const [teamOwnerEmail, setTeamOwnerEmail] = useState<string | null>(null);
+  const teamServerBaselineRef = useRef<PersistedData | null>(null);
   const teamBaseVersionRef = useRef(teamBaseVersion);
   useEffect(() => {
     teamBaseVersionRef.current = teamBaseVersion;
@@ -445,8 +468,9 @@ export default function App() {
 
   useEffect(() => {
     if (workspaceMode !== 'team' || !activeTeamId) {
-      setTeamPeerReadOnly(false);
+      setTeamPeerAccess('bothPush');
       setTeamOwnerEmail(null);
+      teamServerBaselineRef.current = null;
     }
   }, [workspaceMode, activeTeamId]);
 
@@ -455,7 +479,7 @@ export default function App() {
     let cancelled = false;
     void authApi.teamGet(businessToken, activeTeamId).then((res) => {
       if (cancelled) return;
-      setTeamPeerReadOnly(res.data?.peerReadOnly === true);
+      setTeamPeerAccess(normalizeTeamPeerAccess(res.data?.peerAccess, res.data?.peerReadOnly));
       setTeamOwnerEmail(
         typeof res.data?.ownerEmail === 'string' ? res.data.ownerEmail.trim().toLowerCase() : null
       );
@@ -526,6 +550,36 @@ export default function App() {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   }, [todos, todoTombstones, events, eventTombstones, currentDate, viewType, notesByDate, noteMetaByDate, noteTombstonesByDate]);
 
+  const getAccountSnapshot = useCallback((): PersistedData => {
+    return createPersistedPayload(
+      todos,
+      todoTombstones,
+      events,
+      eventTombstones,
+      currentDate,
+      viewType,
+      notesByDate,
+      noteMetaByDate,
+      noteTombstonesByDate
+    );
+  }, [todos, todoTombstones, events, eventTombstones, currentDate, viewType, notesByDate, noteMetaByDate, noteTombstonesByDate]);
+
+  const getTeamPushSnapshot = useCallback((): PersistedData => {
+    const local = getAccountSnapshot();
+    if (workspaceMode !== 'team' || !activeTeamId || !accountEmail || !teamOwnerEmail) {
+      return local;
+    }
+    const isOwner = normCollabEmail(accountEmail) === normCollabEmail(teamOwnerEmail);
+    if (teamPeerAccess !== 'peerReadAllWriteOwn' || isOwner) {
+      return local;
+    }
+    const baseline = teamServerBaselineRef.current;
+    if (!baseline) {
+      return local;
+    }
+    return buildWriteOwnTeamSnapshot(local, baseline, accountEmail, teamOwnerEmail) as PersistedData;
+  }, [getAccountSnapshot, workspaceMode, activeTeamId, accountEmail, teamOwnerEmail, teamPeerAccess]);
+
   /** 已登录且完成过首次拉取后：本地数据变更则防抖推送到云端（个人 → user_snapshots；协作 → team_snapshots） */
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -540,7 +594,7 @@ export default function App() {
     if (inTeam) {
       if (window.localStorage.getItem(teamFirstPullDoneKey(activeTeamId)) !== '1') return;
       if (
-        teamPeerReadOnly &&
+        teamPeerAccess === 'peerReadOnly' &&
         accountEmail &&
         teamOwnerEmail &&
         accountEmail.trim().toLowerCase() !== teamOwnerEmail.trim().toLowerCase()
@@ -554,17 +608,7 @@ export default function App() {
     if (autoPushTimerRef.current) clearTimeout(autoPushTimerRef.current);
     autoPushTimerRef.current = setTimeout(() => {
       autoPushTimerRef.current = null;
-      const snap = createPersistedPayload(
-        todos,
-        todoTombstones,
-        events,
-        eventTombstones,
-        currentDate,
-        viewType,
-        notesByDate,
-        noteMetaByDate,
-        noteTombstonesByDate
-      );
+      const snap = getTeamPushSnapshot();
       if (inTeam && activeTeamId) {
         void authApi
           .teamPush(businessToken, activeTeamId, snap, {
@@ -575,6 +619,11 @@ export default function App() {
           .then((res) => {
             const v = res.data?.version;
             if (typeof v === 'number') updateTeamBaseVersion(activeTeamId, v);
+            try {
+              teamServerBaselineRef.current = JSON.parse(JSON.stringify(snap)) as PersistedData;
+            } catch {
+              /* ignore */
+            }
           })
           .catch((e) => {
             if (e instanceof AccountSyncConflictError) {
@@ -584,7 +633,18 @@ export default function App() {
             console.warn('[auto-push team] 推送失败', e);
           });
       } else {
-        void pushSnapshot(businessToken, snap).catch((e) => {
+        const personalSnap = createPersistedPayload(
+          todos,
+          todoTombstones,
+          events,
+          eventTombstones,
+          currentDate,
+          viewType,
+          notesByDate,
+          noteMetaByDate,
+          noteTombstonesByDate
+        );
+        void pushSnapshot(businessToken, personalSnap).catch((e) => {
           if (e instanceof AccountSyncConflictError) {
             console.warn('[auto-push] 云端版本已变，请先拉取或稍后重试', e);
             return;
@@ -616,9 +676,10 @@ export default function App() {
     activeTeamId,
     deviceId,
     updateTeamBaseVersion,
-    teamPeerReadOnly,
+    teamPeerAccess,
     teamOwnerEmail,
     accountEmail,
+    getTeamPushSnapshot,
   ]);
 
   // Navigation: prev/next based on current view
@@ -665,6 +726,24 @@ export default function App() {
   const handleDrop = useCallback((dateStr: string, time?: string) => {
     const todo = draggedTodoRef.current;
     if (todo) {
+      if (
+        workspaceMode === 'team' &&
+        activeTeamId &&
+        teamPeerAccess === 'peerReadAllWriteOwn' &&
+        accountEmail &&
+        teamOwnerEmail &&
+        normCollabEmail(accountEmail) !== normCollabEmail(teamOwnerEmail)
+      ) {
+        const o = effectiveTodoOwnerEmail(todo, teamOwnerEmail);
+        if (o !== normCollabEmail(accountEmail)) {
+          draggedTodoRef.current = null;
+          return;
+        }
+      }
+      const evCollab =
+        workspaceMode === 'team' && teamOwnerEmail
+          ? effectiveTodoOwnerEmail(todo, teamOwnerEmail)
+          : undefined;
       const newEvent: CalendarEvent = {
         id: `event-${Date.now()}`,
         title: todo.text,
@@ -675,6 +754,7 @@ export default function App() {
         endTime: time ? getEndTime(time) : undefined,
         reminderMinutes: time ? [50, 45, 40, 35, 30, 25, 20, 15, 10, 5] : undefined,
         updatedAt: Date.now(),
+        ...(evCollab !== undefined ? { collabOwnerEmail: evCollab } : {}),
       };
       setEvents(prev => [...prev, newEvent]);
 
@@ -697,7 +777,7 @@ export default function App() {
 
       draggedTodoRef.current = null;
     }
-  }, []);
+  }, [workspaceMode, activeTeamId, teamPeerAccess, accountEmail, teamOwnerEmail]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -706,6 +786,20 @@ export default function App() {
 
   // Set or clear event time on day timeline.
   const handleMoveEvent = useCallback((eventId: string, newTime?: string) => {
+    const ev0 = eventsRef.current.find((e) => e.id === eventId);
+    if (
+      ev0 &&
+      workspaceMode === 'team' &&
+      activeTeamId &&
+      teamPeerAccess === 'peerReadAllWriteOwn' &&
+      accountEmail &&
+      teamOwnerEmail &&
+      normCollabEmail(accountEmail) !== normCollabEmail(teamOwnerEmail)
+    ) {
+      const todoMap = new Map(todosRef.current.map((t) => [t.id, t]));
+      const o = effectiveEventOwnerEmail(ev0, todoMap, teamOwnerEmail);
+      if (o !== normCollabEmail(accountEmail)) return;
+    }
     setEvents(prev =>
       prev.map(ev => {
         if (ev.id !== eventId) return ev;
@@ -718,11 +812,24 @@ export default function App() {
         return { ...ev, startTime: newTime, endTime, updatedAt: Date.now() };
       })
     );
-  }, []);
+  }, [workspaceMode, activeTeamId, teamPeerAccess, accountEmail, teamOwnerEmail]);
 
   const handleToggleComplete = useCallback((eventId: string) => {
     const event = eventsRef.current.find(ev => ev.id === eventId);
     if (!event) return;
+
+    if (
+      workspaceMode === 'team' &&
+      activeTeamId &&
+      teamPeerAccess === 'peerReadAllWriteOwn' &&
+      accountEmail &&
+      teamOwnerEmail &&
+      normCollabEmail(accountEmail) !== normCollabEmail(teamOwnerEmail)
+    ) {
+      const todoMap = new Map(todosRef.current.map((t) => [t.id, t]));
+      const o = effectiveEventOwnerEmail(event, todoMap, teamOwnerEmail);
+      if (o !== normCollabEmail(accountEmail)) return;
+    }
 
     const newCompleted = !event.completed;
     const todoId = event.sourceTodoId;
@@ -750,6 +857,11 @@ export default function App() {
               t.id === todoId ? { ...t, count: (t.count ?? 0) + 1, updatedAt: Date.now() } : t
             );
           }
+          const todoMap = new Map(prev.map((t) => [t.id, t]));
+          const ownerEm =
+            workspaceMode === 'team' && teamOwnerEmail
+              ? effectiveEventOwnerEmail(event, todoMap, teamOwnerEmail)
+              : undefined;
           return [...prev, {
             id: todoId,
             text: event.title,
@@ -758,11 +870,12 @@ export default function App() {
             month: monthRef.current,
             count: 1,
             updatedAt: Date.now(),
+            ...(ownerEm !== undefined ? { collabOwnerEmail: ownerEm } : {}),
           }];
         });
       }
     }
-  }, []);
+  }, [workspaceMode, teamOwnerEmail, teamPeerAccess, activeTeamId, accountEmail]);
 
   const handleMonthSelect = (selectedMonth: number) => {
     setCurrentDate(new Date(year, selectedMonth - 1, 1));
@@ -797,6 +910,8 @@ export default function App() {
       if (!continueAdd) return;
     }
 
+    const collab =
+      workspaceMode === 'team' && accountEmail ? normCollabEmail(accountEmail) : undefined;
     setTodos((prev) => [
       ...prev,
       {
@@ -809,13 +924,27 @@ export default function App() {
         scopeType: 'day',
         count: null,
         updatedAt: Date.now(),
+        ...(collab !== undefined ? { collabOwnerEmail: collab } : {}),
       },
     ]);
     setCurrentDate(today);
     setViewType('today');
-  }, []);
+  }, [workspaceMode, accountEmail]);
 
   const handleUpdateTodo = useCallback((todoId: string, text: string, category: TodoCategory) => {
+    if (
+      workspaceMode === 'team' &&
+      activeTeamId &&
+      teamPeerAccess === 'peerReadAllWriteOwn' &&
+      accountEmail &&
+      teamOwnerEmail &&
+      normCollabEmail(accountEmail) !== normCollabEmail(teamOwnerEmail)
+    ) {
+      const t = todosRef.current.find((x) => x.id === todoId);
+      if (t && effectiveTodoOwnerEmail(t, teamOwnerEmail) !== normCollabEmail(accountEmail)) {
+        return;
+      }
+    }
     const nextColor = categoryColorMap[category];
     setTodos((prev) =>
       prev.map((todo) => (todo.id === todoId ? { ...todo, text, category, color: nextColor, updatedAt: Date.now() } : todo))
@@ -825,9 +954,22 @@ export default function App() {
         event.sourceTodoId === todoId ? { ...event, title: text, color: nextColor, updatedAt: Date.now() } : event
       )
     );
-  }, []);
+  }, [workspaceMode, activeTeamId, teamPeerAccess, accountEmail, teamOwnerEmail]);
 
   const handleDeleteTodo = useCallback((todoId: string) => {
+    if (
+      workspaceMode === 'team' &&
+      activeTeamId &&
+      teamPeerAccess === 'peerReadAllWriteOwn' &&
+      accountEmail &&
+      teamOwnerEmail &&
+      normCollabEmail(accountEmail) !== normCollabEmail(teamOwnerEmail)
+    ) {
+      const t = todosRef.current.find((x) => x.id === todoId);
+      if (t && effectiveTodoOwnerEmail(t, teamOwnerEmail) !== normCollabEmail(accountEmail)) {
+        return;
+      }
+    }
     const localTodo = todosRef.current.find((todo) => todo.id === todoId);
     const localTodoUpdatedAt = localTodo ? readTodoUpdatedAt(localTodo) : 0;
     const tombstoneAt = Math.max(Date.now(), localTodoUpdatedAt + 1);
@@ -846,7 +988,7 @@ export default function App() {
       });
     }
     setEvents((prev) => prev.filter((event) => event.sourceTodoId !== todoId));
-  }, []);
+  }, [workspaceMode, activeTeamId, teamPeerAccess, accountEmail, teamOwnerEmail]);
 
   const handleResetLocalData = useCallback(() => {
     if (typeof window === 'undefined') return;
@@ -1067,20 +1209,6 @@ export default function App() {
 
   const filteredTodos = getFilteredTodos();
 
-  const getAccountSnapshot = useCallback((): PersistedData => {
-    return createPersistedPayload(
-      todos,
-      todoTombstones,
-      events,
-      eventTombstones,
-      currentDate,
-      viewType,
-      notesByDate,
-      noteMetaByDate,
-      noteTombstonesByDate
-    );
-  }, [todos, todoTombstones, events, eventTombstones, currentDate, viewType, notesByDate, noteMetaByDate, noteTombstonesByDate]);
-
   const applyAccountSnapshot = useCallback((snapshot: unknown) => {
     if (!isPersistedDataLike(snapshot)) {
       throw new Error('云端快照格式无效，无法应用到本地');
@@ -1151,7 +1279,14 @@ export default function App() {
         window.localStorage.setItem(teamFirstPullDoneKey(teamId), '1');
       }
       if (snapshot != null && isPersistedDataLike(snapshot)) {
+        try {
+          teamServerBaselineRef.current = JSON.parse(JSON.stringify(snapshot)) as PersistedData;
+        } catch {
+          teamServerBaselineRef.current = null;
+        }
         applyAccountSnapshot(snapshot);
+      } else {
+        teamServerBaselineRef.current = null;
       }
     },
     [applyAccountSnapshot, updateTeamBaseVersion]
@@ -1177,7 +1312,7 @@ export default function App() {
       setActiveTeamId(tid);
       const res = await authApi.teamPull(businessToken, tid);
       const ver = typeof res.data?.version === 'number' ? res.data.version : 0;
-      setTeamPeerReadOnly(res.data?.peerReadOnly === true);
+      setTeamPeerAccess(normalizeTeamPeerAccess(res.data?.peerAccess, res.data?.peerReadOnly));
       setTeamOwnerEmail(
         typeof res.data?.ownerEmail === 'string' ? res.data.ownerEmail.trim().toLowerCase() : null
       );
@@ -1190,13 +1325,13 @@ export default function App() {
     async (opts?: { skipTeamFlush?: boolean }) => {
     if (!opts?.skipTeamFlush && workspaceMode === 'team' && businessToken && activeTeamId) {
       const canFlushTeam =
-        !teamPeerReadOnly ||
+        teamPeerAccess !== 'peerReadOnly' ||
         (accountEmail &&
           teamOwnerEmail &&
           accountEmail.trim().toLowerCase() === teamOwnerEmail.trim().toLowerCase());
       if (canFlushTeam) {
         try {
-          const resPush = await authApi.teamPush(businessToken, activeTeamId, getAccountSnapshot(), {
+          const resPush = await authApi.teamPush(businessToken, activeTeamId, getTeamPushSnapshot(), {
             baseVersion: teamBaseVersionRef.current,
             deviceId,
             platform: 'web',
@@ -1242,16 +1377,57 @@ export default function App() {
     updateBaseVersion,
     updateTeamBaseVersion,
     workspaceMode,
-    teamPeerReadOnly,
+    teamPeerAccess,
     teamOwnerEmail,
     accountEmail,
+    getTeamPushSnapshot,
   ]
   );
 
-  const syncTeamWorkspaceMeta = useCallback((meta: { peerReadOnly: boolean; ownerEmail: string | null }) => {
-    setTeamPeerReadOnly(meta.peerReadOnly);
+  const syncTeamWorkspaceMeta = useCallback((meta: { peerAccess: TeamPeerAccess; ownerEmail: string | null }) => {
+    setTeamPeerAccess(meta.peerAccess);
     setTeamOwnerEmail(meta.ownerEmail ? meta.ownerEmail.trim().toLowerCase() : null);
   }, []);
+
+  const handleAfterLogout = useCallback(
+    (opts: { clearLocalCalendar: boolean }) => {
+      if (typeof window === 'undefined' || !opts.clearLocalCalendar) return;
+
+      window.localStorage.removeItem(STORAGE_KEY);
+      window.localStorage.removeItem(FIRST_PULL_DONE_KEY);
+      window.localStorage.removeItem(ACCOUNT_LAST_PULL_AT_KEY);
+      window.localStorage.removeItem(ACCOUNT_LAST_PUSH_AT_KEY);
+      updateBaseVersion(0);
+
+      window.localStorage.setItem(WORKSPACE_MODE_KEY, 'personal');
+      window.localStorage.removeItem(ACTIVE_TEAM_ID_KEY);
+      removeLocalStorageKeysByPrefix(['todo-calendar-team-base-', 'todo-calendar-team-first-pull-']);
+
+      teamServerBaselineRef.current = null;
+      setWorkspaceMode('personal');
+      setActiveTeamId(null);
+      setTeamBaseVersion(0);
+      setTeamPeerAccess('bothPush');
+      setTeamOwnerEmail(null);
+
+      setCurrentDate(new Date(2024, 9, 15));
+      setViewType('month');
+      const normalizedDefaults = normalizeTodoColorsByCategory(defaultTodos);
+      setTodos(normalizedDefaults);
+      setTodoTombstones({});
+      setEvents(normalizeEventColorsBySourceTodo(defaultEvents, normalizedDefaults));
+      setEventTombstones({});
+      setNotesByDate({});
+      setNoteMetaByDate({});
+      setNoteTombstonesByDate({});
+      setShowMonthPicker(false);
+      setTodoMergeHint('');
+      setEventMergeHint('');
+      setNoteMergeHint('');
+      setAccountSyncRuntime('未登录');
+    },
+    [updateBaseVersion]
+  );
 
   const onTeamPushedVersion = useCallback(
     (teamId: string, v: number) => {
@@ -1408,6 +1584,8 @@ export default function App() {
               const currentWeekStart = getWeekDays(new Date(currentDate))[0].fullDate;
               const scopeType: TodoScopeType =
                 viewType === 'today' ? 'day' : viewType === 'week' ? 'week' : 'month';
+              const collab =
+                workspaceMode === 'team' && accountEmail ? normCollabEmail(accountEmail) : undefined;
 
               return [
                 ...prev,
@@ -1422,6 +1600,7 @@ export default function App() {
                   scopeStart: scopeType === 'week' ? currentWeekStart : undefined,
                   count: null,
                   updatedAt: Date.now(),
+                  ...(collab !== undefined ? { collabOwnerEmail: collab } : {}),
                 },
               ];
             })
@@ -1496,7 +1675,7 @@ export default function App() {
         open={showAccountLogin}
         onClose={() => setShowAccountLogin(false)}
         onPullSnapshot={applyAccountSnapshot}
-        onPushSnapshot={getAccountSnapshot}
+        onPushSnapshot={getTeamPushSnapshot}
         onRuntimeStatusChange={setAccountSyncRuntime}
         workspaceMode={workspaceMode}
         activeTeamId={activeTeamId}
@@ -1505,9 +1684,10 @@ export default function App() {
         onSwitchToPersonalWorkspace={switchToPersonalWorkspace}
         onTeamCloudPulled={applyTeamCloudSnapshot}
         onTeamPushedVersion={onTeamPushedVersion}
-        teamPeerReadOnly={teamPeerReadOnly}
+        teamPeerAccess={teamPeerAccess}
         teamOwnerEmail={teamOwnerEmail}
         onTeamWorkspaceMeta={syncTeamWorkspaceMeta}
+        onAfterLogout={handleAfterLogout}
       />
     </div>
   );
