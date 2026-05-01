@@ -161,7 +161,6 @@ export default function AccountLoginModal({
       return;
     }
 
-    setPollFallbackActive(false);
     syncDebugInfo('watch start', {
       email: accountEmail,
       baseVersion: baseVersionRef.current,
@@ -229,20 +228,31 @@ export default function AccountLoginModal({
       }
     };
 
-    const startPollFallback = () => {
+    /** 个人云：与 watch 并行，固定间隔 HTTP pull（watch 仅作加速；watch 异常时 interval 已存在则不再重复建） */
+    const beginPersonalPoll = (reason: 'parallel' | 'watch-failed') => {
       if (pollStarted || cancelled) return;
       pollStarted = true;
       setPollFallbackActive(true);
-      syncDebugWarn('watch-fallback', 'watch failed, starting HTTP poll fallback', {
-        email: accountEmail,
-        intervalMs: SNAPSHOT_POLL_INTERVAL_MS,
-        ts: Date.now(),
-      });
+      if (reason === 'watch-failed') {
+        syncDebugWarn('watch-fallback', 'watch failed, ensuring HTTP poll is active', {
+          email: accountEmail,
+          intervalMs: SNAPSHOT_POLL_INTERVAL_MS,
+          ts: Date.now(),
+        });
+      } else {
+        syncDebugInfo('personal-poll', 'HTTP pull every 15s in parallel with watch', {
+          email: accountEmail,
+          intervalMs: SNAPSHOT_POLL_INTERVAL_MS,
+          ts: Date.now(),
+        });
+      }
       void runPollPull();
       pollTimer = window.setInterval(() => {
         void runPollPull();
       }, SNAPSHOT_POLL_INTERVAL_MS);
     };
+
+    beginPersonalPoll('parallel');
 
     void watchUserSnapshotByEmail(accountEmail, {
       onChange: (row) => applyRemoteRow(row, 'watch'),
@@ -262,16 +272,25 @@ export default function AccountLoginModal({
           err,
           ts: Date.now(),
         });
-        startPollFallback();
+        beginPersonalPoll('watch-failed');
       },
-    }).then((w) => {
-      if (cancelled) {
-        w.close();
-        return;
-      }
-      closeFn = w.close;
-      syncDebugInfo('watch ready', { email: accountEmail, ts: Date.now() });
-    });
+    })
+      .then((w) => {
+        if (cancelled) {
+          w.close();
+          return;
+        }
+        closeFn = w.close;
+        syncDebugInfo('watch ready', { email: accountEmail, ts: Date.now() });
+      })
+      .catch((err) => {
+        syncDebugWarn('watch-init', 'watch init failed', {
+          email: accountEmail,
+          err,
+          ts: Date.now(),
+        });
+        beginPersonalPoll('watch-failed');
+      });
 
     return () => {
       cancelled = true;
@@ -298,7 +317,7 @@ export default function AccountLoginModal({
     }
     const pull = formatSyncShortTime(lastPullAt);
     const push = formatSyncShortTime(lastPushAt);
-    const poll = pollFallbackActive ? ' · 轮询兜底' : '';
+    const poll = pollFallbackActive ? ' · 定时拉取' : '';
     const line = `已登录 · 拉 ${pull} · 推 ${push}${poll}`;
     if (line === lastReportedRuntimeRef.current) return;
     lastReportedRuntimeRef.current = line;
@@ -616,7 +635,32 @@ export default function AccountLoginModal({
       setError('请先登录并进入协作空间');
       return;
     }
-    if (!window.confirm('确定退出协作空间？若你是最后一人，空间会被删除。')) return;
+    let memberCount = 0;
+    try {
+      const g = await authApi.teamGet(businessToken, activeTeamId);
+      memberCount = Array.isArray(g.data?.members) ? g.data.members.length : 0;
+    } catch {
+      memberCount = -1;
+    }
+    let confirmMsg: string;
+    if (memberCount === 1) {
+      confirmMsg =
+        '【重要】当前协作空间里只有你一个人。\n\n' +
+        '点「确定」退出后，整个协作空间会被删除，这个协作 ID 也会永久失效，以后无法再用该 ID 进入。\n\n' +
+        '如果只是想回到个人云、但希望保留协作空间给队友或以后再用，请点「取消」，然后使用「切回个人云」。\n\n' +
+        '仍要删除协作空间并退出吗？';
+    } else if (memberCount === 2) {
+      confirmMsg =
+        '确定退出该协作空间吗？\n\n' +
+        '空间会保留，队友可继续使用；协作 ID 仍然有效。你之后若在仍有空位时，可以凭同一 ID 再次加入。\n\n' +
+        '若只想暂时用个人云而不退出成员身份，可点「取消」后使用「切回个人云」。';
+    } else {
+      confirmMsg =
+        '确定退出协作空间吗？\n\n' +
+        '若你是空间里最后一人，退出后整个协作空间将被删除，协作 ID 将永久失效。\n\n' +
+        '若只想切回个人云、不删除协作空间，请点「取消」，改用「切回个人云」。';
+    }
+    if (!window.confirm(confirmMsg)) return;
     setBusy(true);
     try {
       await authApi.teamLeave(businessToken, activeTeamId);
@@ -694,7 +738,46 @@ export default function AccountLoginModal({
     }
     setBusy(true);
     try {
-      await verify(email, code);
+      const data = await verify(email, code);
+      const token = data?.token;
+      if (typeof token !== 'string' || !token) {
+        setError('登录异常：未返回 token');
+        return;
+      }
+      try {
+        if (workspaceMode === 'team' && activeTeamId) {
+          const res = await authApi.teamPull(token, activeTeamId);
+          const ver = typeof res.data?.version === 'number' ? res.data.version : 0;
+          onTeamWorkspaceMeta?.({
+            peerReadOnly: res.data?.peerReadOnly === true,
+            ownerEmail: typeof res.data?.ownerEmail === 'string' ? res.data.ownerEmail : null,
+          });
+          onTeamCloudPulled?.(activeTeamId, res.data?.snapshot ?? null, ver);
+          const pulledAt = Date.now();
+          setLastPullAt(pulledAt);
+          window.localStorage.setItem(ACCOUNT_LAST_PULL_AT_KEY, String(pulledAt));
+          setHint('登录成功，已自动从协作云端合并最新数据');
+        } else {
+          const res = await pullSnapshot(token);
+          const snap = res.data?.snapshot ?? null;
+          if (snap != null) {
+            onPullSnapshot(snap);
+          }
+          const pulledAt = Date.now();
+          setLastPullAt(pulledAt);
+          window.localStorage.setItem(ACCOUNT_LAST_PULL_AT_KEY, String(pulledAt));
+          setHasPulledOnce(true);
+          window.localStorage.setItem(FIRST_PULL_DONE_KEY, '1');
+          setHint('登录成功，已自动从个人云端合并最新数据');
+        }
+      } catch (pullErr) {
+        if (workspaceMode === 'team' && activeTeamId) {
+          setHint('登录时自动拉取失败，必须手动拉');
+        } else {
+          setHint('登录成功，但自动拉取失败，请稍后点击「拉取云端」。');
+        }
+        console.warn('[account] login auto-pull failed', pullErr);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : '验证失败');
     } finally {
@@ -861,6 +944,68 @@ export default function AccountLoginModal({
       setError(e instanceof Error ? e.message : '推送失败');
     } finally {
       setBusy(false);
+    }
+  };
+
+  /** 退出前尝试推送，再弹窗说明是否已同步，最后登出（不额外弹出「确认推送」以免与退出打断叠） */
+  const handleLogout = async () => {
+    const finishLogout = () => {
+      logout();
+      setHint('');
+      setCode('');
+    };
+    if (!businessToken) {
+      finishLogout();
+      return;
+    }
+    setBusy(true);
+    setError('');
+    let syncOk = false;
+    let syncDetail = '';
+    try {
+      if (workspaceMode === 'team' && activeTeamId) {
+        if (teamPushForbidden) {
+          syncDetail = '未同步：当前为「对方只读」成员，无法向协作云端推送。';
+        } else {
+          const localSnapshot = onPushSnapshot();
+          const pushRes = await authApi.teamPush(businessToken, activeTeamId, localSnapshot, {
+            baseVersion: teamBaseVersion,
+            deviceId,
+            platform: 'web',
+          });
+          const v = pushRes.data?.version;
+          if (typeof v === 'number') onTeamPushedVersion?.(activeTeamId, v);
+          const pushedAt = Date.now();
+          setLastPushAt(pushedAt);
+          window.localStorage.setItem(ACCOUNT_LAST_PUSH_AT_KEY, String(pushedAt));
+          syncOk = true;
+        }
+      } else {
+        const localSnapshot = onPushSnapshot();
+        await pushSnapshot(businessToken, localSnapshot);
+        const pushedAt = Date.now();
+        setLastPushAt(pushedAt);
+        window.localStorage.setItem(ACCOUNT_LAST_PUSH_AT_KEY, String(pushedAt));
+        syncOk = true;
+      }
+    } catch (e) {
+      if (e instanceof AccountSyncConflictError) {
+        syncDetail = '未同步：云端版本已变（存在冲突），未能自动推送。可稍后再登录处理。';
+      } else {
+        syncDetail = `未同步：${e instanceof Error ? e.message : '推送失败'}。`;
+      }
+    } finally {
+      setBusy(false);
+    }
+    if (syncOk) {
+      window.alert('已同步：本地数据已上传到云端。');
+      finishLogout();
+    } else {
+      const stillQuit = window.confirm(
+        `${syncDetail}\n\n仍要退出登录吗？\n点「确定」退出，点「取消」留在已登录状态。`
+      );
+      if (stillQuit) finishLogout();
+      else setHint('已取消退出，可处理同步后再试。');
     }
   };
 
@@ -1179,9 +1324,7 @@ export default function AccountLoginModal({
                 type="button"
                 disabled={busy}
                 onClick={() => {
-                  logout();
-                  setHint('');
-                  setCode('');
+                  void handleLogout();
                 }}
                 className="rounded-lg border border-[var(--shell-border)] px-4 py-2 text-sm text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]"
               >

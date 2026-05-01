@@ -1,8 +1,8 @@
-# 项目说明与功能入口（v0.2.0）
+# 项目说明与功能入口（v0.3.0）
 
 这份文档给你做长期参考：帮助你快速知道“哪个文件负责什么、功能入口在哪、以后怎么加功能不混乱”。
 
-> **版本**：应用与安装包以 **`src-tauri/tauri.conf.json` 的 `version`** 为准（当前 **0.2.0**），并与 Git 标签 **`v0.2.0`** 对齐；详见 CHANGELOG 与 `.cursorrules` 发布约定。
+> **版本**：应用与安装包以 **`src-tauri/tauri.conf.json` 的 `version`** 为准（当前 **0.3.0**），并与 Git 标签 **`v0.3.0`** 对齐；详见 CHANGELOG 与 `.cursorrules` 发布约定。
 
 ## 1. 目录与文件职责（关键）
 
@@ -212,11 +212,12 @@
 |---|---|---|---|
 | 顶部「账号」 | `src/App.tsx` | `setShowAccountLogin(true)` | 打开 `AccountLoginModal` |
 | 发送验证码 | `src/features/account/AccountLoginModal.tsx` | `handleSend()` | `useSharedAccountAuth().sendCode()` -> `authApi.sendCode()` -> `/test` `action=send-code` |
-| 验证并登录 | `src/features/account/AccountLoginModal.tsx` | `handleVerify()` | `useSharedAccountAuth().verify()` -> `authApi.verifyCode()` -> `/test` `action=verify-code`（可返回 `customLoginTicket`） |
+| 验证并登录 | `src/features/account/AccountLoginModal.tsx` | `handleVerify()` | `verify()` 成功后 **自动拉取**：个人云 `pullSnapshot` + `onPullSnapshot` 并写 **`todo-calendar-first-pull-done`**；协作云 **`team-pull`** + `onTeamCloudPulled`；协作自动拉取失败时提示 **必须手动拉** |
+| 退出业务登录 | `AccountLoginModal.tsx` | `handleLogout()` | 先尝试 **推送**（个人 `pushSnapshot` / 协作 `teamPush`）；成功 **alert 已同步** 后 `logout()`；失败 **`confirm` 是否仍退出**（取消则保留登录） |
 | 匿名登录（自动） | `src/features/account/cloudbase.ts` | `ensureAnonymousSignIn()` | CloudBase `auth.signInAnonymously()` |
 | 取访问令牌（自动） | `src/features/account/cloudbase.ts` | `getCloudbaseAccessToken()` | CloudBase `auth.getAccessToken()` |
 | 推送云端 | `src/features/account/AccountLoginModal.tsx` + `src/App.tsx` | `handlePush()` + `getAccountSnapshot()`；**另：**`App.tsx` 在已登录且完成首次拉取后对本地数据变更 **防抖自动 push** | `authApi.pushSnapshot()` -> `/test` `action=push` |
-| 拉取云端 | `src/features/account/AccountLoginModal.tsx` + `src/App.tsx` | `handlePull()` + `applyAccountSnapshot()`；**另：**`watch` 失败时弹窗内 **HTTP `pull` 轮询** | `authApi.pullSnapshot()` -> `/test` `action=pull` |
+| 拉取云端 | `AccountLoginModal.tsx` + `App.tsx` | `handlePull()` + `applyAccountSnapshot()`；**另：**个人云下 **`watch` 与 HTTP `pull` 约 15s 轮询并行** | `authApi.pullSnapshot()` -> `/test` `action=pull` |
 | 接口地址/环境切换 | `src/features/account/config.ts` | `getAccountHttpUrl()` / `CLOUDBASE_ENV_ID` | 控制请求目标 |
 | 环境变量声明 | `src/vite-env.d.ts` | `VITE_CLOUDBASE_ENV_ID` / `VITE_ACCOUNT_HTTP_BASE` | 供 TS 校验与读取 |
 | 接口封装总入口 | `src/features/account/authApi.ts` | `postAccountAction()` | 统一 `POST /test` + Bearer |
@@ -250,7 +251,7 @@
 - 自动同步常驻运行（关闭账号弹窗后仍生效）。  
 - 首次登录未拉取前禁止开启自动同步，避免空本地覆盖云端。  
 - **`App.tsx` 防抖自动推送**：已登录且本地存过「至少一次拉取成功」标记（`todo-calendar-first-pull-done`）后，Todo/事件/笔记/日期等本地变更约 **1.2s** 内自动 `push`（与手动推送同接口）。  
-- **云端下行**：理想路径为文档库 `watch`；当前环境常出现 `INIT_WATCH_FAIL`，产品侧以 **`pull` 定时轮询（约 15s）** 兜底，逻辑仍按 `version` 大于本地基线才应用。  
+- **云端下行（个人云）**：文档库 `watch` 与 **`pull` 定时轮询（约 15s）并行**（`watch` 仅加速）；仍按 `version` 大于本地基线才应用。协作云下行见 **`team-pull`** / 登录自动拉取。  
 - 自动双向同步策略（账号弹窗内「空闲自动推送」开关）：  
   - 仅本地改动：自动推  
   - 仅云端改动：自动拉  
@@ -288,7 +289,7 @@
 |------|------|------|
 | 账号 / 发码 / 验码 / 快照拉推 | 云函数 HTTP `newworld` | 与数据库安全规则无关；服务端可写 `user_snapshots`、`user_tokens` 等。 |
 | 下行实时（可选） | `@cloudbase/js-sdk` `watch` | 依赖自定义登录 + 库规则；当前环境易 `INIT_WATCH_FAIL`，**不作为唯一依赖**。 |
-| 下行兜底 | 云函数 `pull` 轮询 | `AccountLoginModal` 内 `watch` 报错后约 **15s** 一次，与手动拉取同路径。 |
+| 下行兜底（个人云） | 云函数 `pull` 轮询 | `AccountLoginModal` 内与 `watch` **并行**约 **15s** 一次，与手动拉取同路径；协作工作区不跑此个人云轮询。 |
 | 上行 | 云函数 `push` + **`App` 防抖自动 push** | 本地变更后约 **1.2s** 推送；须已完成至少一次「拉取云端」。 |
 | 协作上行/下行 | 云函数 **`team-pull` / `team-push`** + `App` 在协作工作区下防抖 **`teamPush`** | 与个人云 **隔离**；须完成协作侧首次拉取标记（`teamFirstPullDoneKey`）后才自动推。 |
 
@@ -302,10 +303,10 @@
 ### 10.3 前端关键约定
 
 - **全应用只有一份账号状态**：`main.tsx` 使用 `AccountAuthProvider`；业务代码用 **`useSharedAccountAuth()`**，不要与 `useAccountAuth()` 混用导致双实例。  
-- **顶栏同步状态**：登录后展示「已登录 · 拉/推 最近时间」；若 watch 失败走 HTTP 轮询，会追加 **「轮询兜底」**；鼠标悬停可看完整文案。  
+- **顶栏同步状态**：登录后展示「已登录 · 拉/推 最近时间」；个人云开启 HTTP 定时拉取时追加 **「定时拉取」**（与 `watch` 并行）。  
 - **同步诊断日志**：仅在 `.env` 设置 **`VITE_SYNC_DEBUG=true`**（见 `.env.example`）并重启 `npm run dev` / 重新打包后，才会在控制台输出 **`[sync-debug]`**（watch / poll 等）；默认关闭以免刷屏。同类告警约 **30s** 内节流一次。
 
-## 11. 双人协作速查（v0.2.0）
+## 11. 双人协作速查（v0.2.0 起，同步行为随 v0.3.0 已增强）
 
 ### 11.1 产品语义
 
