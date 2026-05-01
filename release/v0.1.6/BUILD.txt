@@ -1,0 +1,8 @@
+v0.1.6 Windows 安装包（NSIS）请在本机生成：
+
+1. 确认已提交且工作区干净；在当前提交上创建并推送标签：git tag v0.1.6 && git push origin v0.1.6
+2. 在「x64 Native Tools」或已加载 vcvars 的终端执行：
+   powershell -ExecutionPolicy Bypass -File .\scripts\release.ps1
+   （若链接报错 LNK1105，可先设置 $env:CARGO_TARGET_DIR = "C:\Users\<用户名>\tauri-cargo-target\app" 再构建，见 PROJECT_GUIDE §2.7。）
+
+成功后可将生成的 Todo Calendar_0.1.6_x64-setup.exe 复制到此目录（release\v0.1.6\）再提交。
