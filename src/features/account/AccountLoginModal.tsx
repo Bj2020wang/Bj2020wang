@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { useSharedAccountAuth } from './AccountAuthContext';
 import { AccountSyncConflictError } from './authApi';
 import type { SnapshotHistoryItem } from './authApi';
 import { watchUserSnapshotByEmail } from './userSnapshotDb';
 import type { UserSnapshotDocPayload } from './userSnapshotDb';
+import { syncDebugInfo, syncDebugWarn } from './syncDebug';
 
 const AUTO_PUSH_IDLE_MS = 30_000;
 const AUTO_PUSH_INTERVAL_MS = 60_000;
@@ -17,12 +18,27 @@ const ACCOUNT_LAST_PUSH_AT_KEY = 'todo-calendar-account-last-push-at';
 /** watch 不可用时用云函数 pull 轮询兜底（与手动「拉取云端」同路径，不依赖前端库可读） */
 const SNAPSHOT_POLL_INTERVAL_MS = 15_000;
 
+function formatSyncShortTime(ts: number | null): string {
+  if (ts == null) return '—';
+  const d = new Date(ts);
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) {
+    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+  }
+  return `${d.getMonth() + 1}/${d.getDate()} ${d.toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })}`;
+}
+
 interface AccountLoginModalProps {
   open: boolean;
   onClose: () => void;
   onPullSnapshot: (snapshot: unknown) => void;
   onPushSnapshot: () => unknown;
-  onRuntimeStatusChange?: (status: '未登录' | '同步中' | '空闲') => void;
+  /** 顶栏一行文案，例如「已登录 · 拉 14:05 · 推 14:06 · 轮询兜底」 */
+  onRuntimeStatusChange?: (statusLine: string) => void;
 }
 
 export default function AccountLoginModal({
@@ -83,10 +99,12 @@ export default function AccountLoginModal({
     const n = Number(raw);
     return Number.isFinite(n) ? n : null;
   });
+  const [pollFallbackActive, setPollFallbackActive] = useState(false);
   const lastActivityAtRef = useRef(Date.now());
   const lastAutoPushAtRef = useRef(0);
   const lastSyncActionAtRef = useRef(0);
   const lastReportedRuntimeRef = useRef<string>('');
+  const runtimePhaseRef = useRef<'未登录' | '同步中' | '空闲'>('未登录');
   const baseVersionRef = useRef(baseVersion);
   const pullSnapshotRef = useRef(pullSnapshot);
   pullSnapshotRef.current = pullSnapshot;
@@ -100,7 +118,8 @@ export default function AccountLoginModal({
     if (typeof window === 'undefined' || !businessToken) return;
     if (!accountEmail) return;
 
-    console.info('[sync-debug] watch start', {
+    setPollFallbackActive(false);
+    syncDebugInfo('watch start', {
       email: accountEmail,
       baseVersion: baseVersionRef.current,
       ts: Date.now(),
@@ -113,15 +132,15 @@ export default function AccountLoginModal({
 
     const applyRemoteRow = (row: UserSnapshotDocPayload | null, source: 'watch' | 'poll') => {
       if (cancelled) {
-        console.info('[sync-debug] apply ignored: cancelled', { source, ts: Date.now() });
+        syncDebugInfo('apply ignored: cancelled', { source, ts: Date.now() });
         return;
       }
       if (!row) {
-        console.info('[sync-debug] row empty', { source, ts: Date.now() });
+        syncDebugInfo('row empty', { source, ts: Date.now() });
         return;
       }
       const v = row.version;
-      console.info('[sync-debug] remote row', {
+      syncDebugInfo('remote row', {
         source,
         incomingVersion: v,
         baseVersion: baseVersionRef.current,
@@ -129,7 +148,7 @@ export default function AccountLoginModal({
         ts: Date.now(),
       });
       if (v <= baseVersionRef.current) {
-        console.info('[sync-debug] skipped by version gate', {
+        syncDebugInfo('skipped by version gate', {
           source,
           incomingVersion: v,
           baseVersion: baseVersionRef.current,
@@ -137,7 +156,7 @@ export default function AccountLoginModal({
         });
         return;
       }
-      console.info('[sync-debug] apply snapshot', {
+      syncDebugInfo('apply snapshot', {
         source,
         incomingVersion: v,
         previousBaseVersion: baseVersionRef.current,
@@ -163,14 +182,15 @@ export default function AccountLoginModal({
         };
         applyRemoteRow(row, 'poll');
       } catch (e) {
-        console.warn('[sync-debug] poll pull failed', { e, ts: Date.now() });
+        syncDebugWarn('poll-pull', 'poll pull failed', { e, ts: Date.now() });
       }
     };
 
     const startPollFallback = () => {
       if (pollStarted || cancelled) return;
       pollStarted = true;
-      console.warn('[sync-debug] watch failed, starting HTTP poll fallback', {
+      setPollFallbackActive(true);
+      syncDebugWarn('watch-fallback', 'watch failed, starting HTTP poll fallback', {
         email: accountEmail,
         intervalMs: SNAPSHOT_POLL_INTERVAL_MS,
         ts: Date.now(),
@@ -190,7 +210,7 @@ export default function AccountLoginModal({
           message?: unknown;
           original?: unknown;
         } | null;
-        console.warn('[sync-debug] watch error', {
+        syncDebugWarn('watch-error', 'watch error', {
           email: accountEmail,
           errCode: e?.errCode ?? null,
           errMsg: e?.errMsg ?? null,
@@ -207,25 +227,59 @@ export default function AccountLoginModal({
         return;
       }
       closeFn = w.close;
-      console.info('[sync-debug] watch ready', { email: accountEmail, ts: Date.now() });
+      syncDebugInfo('watch ready', { email: accountEmail, ts: Date.now() });
     });
 
     return () => {
       cancelled = true;
+      setPollFallbackActive(false);
       if (pollTimer != null) {
         window.clearInterval(pollTimer);
         pollTimer = undefined;
       }
-      console.info('[sync-debug] watch cleanup', { email: accountEmail, ts: Date.now() });
+      syncDebugInfo('watch cleanup', { email: accountEmail, ts: Date.now() });
       closeFn?.();
     };
   }, [accountEmail, businessToken, onPullSnapshot, updateBaseVersion]);
 
-  const reportRuntime = (status: '未登录' | '同步中' | '空闲') => {
-    if (lastReportedRuntimeRef.current === status) return;
-    lastReportedRuntimeRef.current = status;
-    onRuntimeStatusChange?.(status);
-  };
+  const emitIdleStatusLine = useCallback(() => {
+    if (!businessToken) return;
+    const pull = formatSyncShortTime(lastPullAt);
+    const push = formatSyncShortTime(lastPushAt);
+    const poll = pollFallbackActive ? ' · 轮询兜底' : '';
+    const line = `已登录 · 拉 ${pull} · 推 ${push}${poll}`;
+    if (line === lastReportedRuntimeRef.current) return;
+    lastReportedRuntimeRef.current = line;
+    onRuntimeStatusChange?.(line);
+  }, [lastPullAt, lastPushAt, pollFallbackActive, businessToken, onRuntimeStatusChange]);
+
+  const reportRuntime = useCallback(
+    (phase: '未登录' | '同步中' | '空闲') => {
+      runtimePhaseRef.current = phase;
+      if (phase === '未登录') {
+        const line = '未登录';
+        if (line === lastReportedRuntimeRef.current) return;
+        lastReportedRuntimeRef.current = line;
+        onRuntimeStatusChange?.(line);
+        return;
+      }
+      if (phase === '同步中') {
+        const line = '同步检查中…';
+        if (line === lastReportedRuntimeRef.current) return;
+        lastReportedRuntimeRef.current = line;
+        onRuntimeStatusChange?.(line);
+        return;
+      }
+      emitIdleStatusLine();
+    },
+    [emitIdleStatusLine, onRuntimeStatusChange]
+  );
+
+  useEffect(() => {
+    if (runtimePhaseRef.current === '空闲' && businessToken) {
+      emitIdleStatusLine();
+    }
+  }, [emitIdleStatusLine, businessToken]);
 
   const readUpdatedAt = (value: unknown): number | null => {
     if (!value || typeof value !== 'object') return null;
@@ -393,7 +447,7 @@ export default function AccountLoginModal({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [autoPushEnabled, baseVersion, businessToken, busy, hasPulledOnce, onRuntimeStatusChange]);
+  }, [autoPushEnabled, baseVersion, businessToken, busy, hasPulledOnce, reportRuntime]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;

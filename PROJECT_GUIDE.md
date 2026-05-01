@@ -287,4 +287,5 @@
 ### 10.3 前端关键约定
 
 - **全应用只有一份账号状态**：`main.tsx` 使用 `AccountAuthProvider`；业务代码用 **`useSharedAccountAuth()`**，不要与 `useAccountAuth()` 混用导致双实例。  
-- 调试日志前缀 **`[sync-debug]`**（watch / poll / 自动推送冲突等），验收时可在浏览器 Console 过滤。
+- **顶栏同步状态**：登录后展示「已登录 · 拉/推 最近时间」；若 watch 失败走 HTTP 轮询，会追加 **「轮询兜底」**；鼠标悬停可看完整文案。  
+- **同步诊断日志**：仅在 `.env` 设置 **`VITE_SYNC_DEBUG=true`**（见 `.env.example`）并重启 `npm run dev` / 重新打包后，才会在控制台输出 **`[sync-debug]`**（watch / poll 等）；默认关闭以免刷屏。同类告警约 **30s** 内节流一次。

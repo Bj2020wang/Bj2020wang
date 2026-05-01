@@ -401,7 +401,7 @@ export default function App() {
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const [showAccountLogin, setShowAccountLogin] = useState(false);
-  const [accountSyncRuntime, setAccountSyncRuntime] = useState<'未登录' | '同步中' | '空闲'>('未登录');
+  const [accountSyncRuntime, setAccountSyncRuntime] = useState<string>('未登录');
   const [todoMergeHint, setTodoMergeHint] = useState('');
   const [eventMergeHint, setEventMergeHint] = useState('');
   const [noteMergeHint, setNoteMergeHint] = useState('');
@@ -1101,7 +1101,12 @@ export default function App() {
             <User className="w-4 h-4" />
             账号
           </button>
-          <span className="text-xs text-[var(--shell-text-muted)]">{accountSyncRuntime}</span>
+          <span
+            className="text-xs text-[var(--shell-text-muted)] max-w-[min(28rem,40vw)] truncate"
+            title={accountSyncRuntime}
+          >
+            {accountSyncRuntime}
+          </span>
           {todoMergeHint ? <span className="text-xs text-[var(--shell-accent)]">{todoMergeHint}</span> : null}
           {eventMergeHint ? <span className="text-xs text-[var(--shell-accent)]">{eventMergeHint}</span> : null}
           {noteMergeHint ? <span className="text-xs text-[var(--shell-accent)]">{noteMergeHint}</span> : null}

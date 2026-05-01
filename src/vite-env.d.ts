@@ -11,6 +11,8 @@ interface ImportMetaEnv {
   readonly VITE_CLOUDBASE_PUBLISHABLE_KEY?: string;
   /** 不含末尾斜杠，例如 https://xxx.ap-shanghai.app.tcloudbase.com */
   readonly VITE_ACCOUNT_HTTP_BASE?: string;
+  /** 设为 `true` 时输出 `[sync-debug]` 诊断日志（默认关闭） */
+  readonly VITE_SYNC_DEBUG?: string;
 }
 
 interface ImportMeta {

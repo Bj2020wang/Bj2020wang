@@ -1,6 +1,7 @@
 import cloudbase from '@cloudbase/js-sdk';
 import { CLOUDBASE_ENV_ID, CLOUDBASE_PUBLISHABLE_KEY, CLOUDBASE_REGION } from './config';
 import { throwIfTauriFetchLikelySecurityDomain } from './desktopFetchHint';
+import { syncDebugInfo, syncDebugWarn } from './syncDebug';
 
 type CloudbaseApp = ReturnType<typeof cloudbase.init>;
 
@@ -93,7 +94,7 @@ export async function signInWithCustomTicketIfPresent(ticket: string | null | un
     const s = state as unknown as { uid?: unknown; isAnonymous?: unknown } | null;
     const scopeFn = (auth as unknown as { loginScope?: () => Promise<string> }).loginScope;
     const scope = typeof scopeFn === 'function' ? await scopeFn.call(auth) : 'unknown';
-    console.info('[sync-debug] custom sign-in done', {
+    syncDebugInfo('custom sign-in done', {
       hasLoginState: !!state,
       loginScope: scope,
       uid: s?.uid ?? null,
@@ -101,7 +102,7 @@ export async function signInWithCustomTicketIfPresent(ticket: string | null | un
       ts: Date.now(),
     });
   } catch (e) {
-    console.warn('[sync-debug] custom sign-in state read failed', { e, ts: Date.now() });
+    syncDebugWarn('custom-signin-state', 'custom sign-in state read failed', { e, ts: Date.now() });
   }
 }
 
