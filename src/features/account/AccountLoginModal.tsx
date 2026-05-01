@@ -240,7 +240,7 @@ export default function AccountLoginModal({
           ts: Date.now(),
         });
       } else {
-        syncDebugInfo('personal-poll', 'HTTP pull every 15s in parallel with watch', {
+        syncDebugInfo('[personal-poll] HTTP pull every 15s in parallel with watch', {
           email: accountEmail,
           intervalMs: SNAPSHOT_POLL_INTERVAL_MS,
           ts: Date.now(),
