@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
-import { Check } from 'lucide-react';
-import type { CalendarEvent } from '@/types';
+import { Check, ThumbsUp } from 'lucide-react';
+import type { CalendarEvent, TodoItem } from '@/types';
 import { getWeekDays } from '@/lib/calendar-utils';
+import { isPeerEventInTeam } from '@/lib/teamCollab';
 
 interface WeekViewProps {
   currentDate: Date;
@@ -11,9 +12,26 @@ interface WeekViewProps {
   onToggleComplete: (eventId: string) => void;
   onDayClick?: (dateStr: string) => void;
   notesByDate?: Record<string, string>;
+  todos?: TodoItem[];
+  workspaceMode?: 'personal' | 'team';
+  accountEmail?: string | null;
+  teamOwnerEmail?: string | null;
 }
 
-export default function WeekView({ currentDate, events, onDrop, onDragOver, onToggleComplete, onDayClick, notesByDate }: WeekViewProps) {
+export default function WeekView({
+  currentDate,
+  events,
+  onDrop,
+  onDragOver,
+  onToggleComplete,
+  onDayClick,
+  notesByDate,
+  todos = [],
+  workspaceMode = 'personal',
+  accountEmail = null,
+  teamOwnerEmail = null,
+}: WeekViewProps) {
+  const todoMap = useMemo(() => new Map(todos.map((t) => [t.id, t])), [todos]);
   const weekDays = useMemo(() => {
     return getWeekDays(new Date(currentDate));
   }, [currentDate]);
@@ -108,9 +126,20 @@ export default function WeekView({ currentDate, events, onDrop, onDragOver, onTo
                       hover:brightness-110
                     `}
                     style={{ backgroundColor: event.color }}
-                    title={event.completed ? '点击取消完成' : '点击标记完成'}
+                    title={
+                      isPeerEventInTeam(workspaceMode, accountEmail, teamOwnerEmail, event, todoMap)
+                        ? '队友的日程（请谨慎操作）'
+                        : event.completed
+                          ? '点击取消完成'
+                          : '点击标记完成'
+                    }
                   >
-                    <span className="truncate">{event.title}</span>
+                    <span className="flex min-w-0 items-center gap-0.5">
+                      {isPeerEventInTeam(workspaceMode, accountEmail, teamOwnerEmail, event, todoMap) ? (
+                        <ThumbsUp className="h-3 w-3 shrink-0 text-white/90" strokeWidth={2.25} aria-hidden />
+                      ) : null}
+                      <span className="truncate">{event.title}</span>
+                    </span>
                     {event.completed && (
                       <Check className="w-3.5 h-3.5 text-white flex-shrink-0" strokeWidth={3} />
                     )}

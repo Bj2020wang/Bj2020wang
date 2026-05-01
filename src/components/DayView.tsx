@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
-import { Check, GripVertical } from 'lucide-react';
-import type { CalendarEvent } from '@/types';
+import { Check, GripVertical, ThumbsUp } from 'lucide-react';
+import type { CalendarEvent, TodoItem } from '@/types';
+import { isPeerEventInTeam } from '@/lib/teamCollab';
 import { getLunarDate, formatDateKey } from '@/lib/calendar-utils';
 import { WEEKDAYS } from '@/lib/calendar-utils';
 
@@ -12,6 +13,10 @@ interface DayViewProps {
   onToggleComplete: (eventId: string) => void;
   onMoveEvent: (eventId: string, newTime?: string) => void;
   notesByDate?: Record<string, string>;
+  todos?: TodoItem[];
+  workspaceMode?: 'personal' | 'team';
+  accountEmail?: string | null;
+  teamOwnerEmail?: string | null;
 }
 
 // Generate time slots from 08:00 to 23:30, every 30 minutes
@@ -42,7 +47,20 @@ function calcTimePosition(startTime: string, endTime?: string): TimePosition {
   };
 }
 
-export default function DayView({ currentDate, events, onDrop, onDragOver, onToggleComplete, onMoveEvent, notesByDate }: DayViewProps) {
+export default function DayView({
+  currentDate,
+  events,
+  onDrop,
+  onDragOver,
+  onToggleComplete,
+  onMoveEvent,
+  notesByDate,
+  todos = [],
+  workspaceMode = 'personal',
+  accountEmail = null,
+  teamOwnerEmail = null,
+}: DayViewProps) {
+  const todoMap = useMemo(() => new Map(todos.map((t) => [t.id, t])), [todos]);
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth() + 1;
   const day = currentDate.getDate();
@@ -185,7 +203,19 @@ export default function DayView({ currentDate, events, onDrop, onDragOver, onTog
             onClick={() => onToggleComplete(event.id)}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer transition-all
               ${event.completed ? 'opacity-50 line-through' : 'opacity-100'} hover:bg-[var(--shell-surface-hover)]`}
+            title={
+              isPeerEventInTeam(workspaceMode, accountEmail, teamOwnerEmail, event, todoMap)
+                ? '队友的日程（请谨慎操作）'
+                : undefined
+            }
           >
+            {isPeerEventInTeam(workspaceMode, accountEmail, teamOwnerEmail, event, todoMap) ? (
+              <ThumbsUp
+                className="h-3.5 w-3.5 shrink-0 text-amber-500 dark:text-amber-400"
+                strokeWidth={2.25}
+                aria-label="队友日程"
+              />
+            ) : null}
             <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: event.color }} />
             <span className="text-[var(--shell-text-strong)] text-sm flex-1">{event.title}</span>
             {event.completed && <Check className="w-4 h-4 text-[#10B981]" strokeWidth={3} />}
@@ -235,10 +265,19 @@ export default function DayView({ currentDate, events, onDrop, onDragOver, onTog
                     select-none
                   `}
                   style={{ backgroundColor: event.color }}
-                  title={`${event.title} ${event.startTime}${event.endTime ? ' - ' + event.endTime : ''}（拖拽调整时间）`}
+                  title={
+                    isPeerEventInTeam(workspaceMode, accountEmail, teamOwnerEmail, event, todoMap)
+                      ? `队友的日程（请谨慎操作） · ${event.title} ${event.startTime}${
+                          event.endTime ? ' - ' + event.endTime : ''
+                        }`
+                      : `${event.title} ${event.startTime}${event.endTime ? ' - ' + event.endTime : ''}（拖拽调整时间）`
+                  }
                 >
                   <div className="flex items-center gap-1 min-w-0">
                     <GripVertical className="w-3 h-3 opacity-60 flex-shrink-0" />
+                    {isPeerEventInTeam(workspaceMode, accountEmail, teamOwnerEmail, event, todoMap) ? (
+                      <ThumbsUp className="w-3 h-3 shrink-0 text-white/90" strokeWidth={2.25} aria-hidden />
+                    ) : null}
                     <span className="truncate">{event.title}</span>
                   </div>
                   <span className="text-[10px] opacity-70 flex-shrink-0">{event.startTime}</span>

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, ChevronDown, Search, User, Sun, Moon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Search, Sun, Moon } from 'lucide-react';
 import TodoSidebar from '@/components/TodoSidebar';
 import CalendarGrid from '@/components/CalendarGrid';
 import WeekView from '@/components/WeekView';
@@ -21,6 +21,8 @@ import {
   buildWriteOwnTeamSnapshot,
   effectiveEventOwnerEmail,
   effectiveTodoOwnerEmail,
+  isPeerEventInTeam,
+  isPeerTodoInTeam,
   normCollabEmail,
   normalizeTeamPeerAccess,
   type TeamPeerAccess,
@@ -94,6 +96,7 @@ interface PersistedData {
   viewType: ViewType;
   eventsByDate: Record<string, string[]>;
   notesByDate: Record<string, string>;
+  noteOwnerByDate?: Record<string, string>;
   noteMetaByDate?: Record<string, number>;
   noteTombstonesByDate?: Record<string, number>;
   updatedAt?: number;
@@ -193,6 +196,7 @@ const createPersistedPayload = (
   currentDate: Date,
   viewType: ViewType,
   notesByDate: Record<string, string>,
+  noteOwnerByDate: Record<string, string>,
   noteMetaByDate: Record<string, number>,
   noteTombstonesByDate: Record<string, number>
 ): PersistedData => ({
@@ -204,6 +208,7 @@ const createPersistedPayload = (
   viewType,
   eventsByDate: buildEventsByDate(events),
   notesByDate,
+  noteOwnerByDate,
   noteMetaByDate,
   noteTombstonesByDate,
   updatedAt: Date.now(),
@@ -368,24 +373,30 @@ const mergeEventRecords = (
 
 const mergeNoteRecords = (
   localNotes: Record<string, string>,
+  localOwnerByDate: Record<string, string>,
   localMeta: Record<string, number>,
   localTombstones: Record<string, number>,
   cloudNotes: Record<string, string>,
+  cloudOwnerByDate: Record<string, string>,
   cloudMeta: Record<string, number>,
   cloudTombstones: Record<string, number>
 ): {
   notesByDate: Record<string, string>;
+  noteOwnerByDate: Record<string, string>;
   noteMetaByDate: Record<string, number>;
   noteTombstonesByDate: Record<string, number>;
   mergeCount: number;
 } => {
   const mergedNotes: Record<string, string> = {};
+  const mergedOwners: Record<string, string> = {};
   const mergedMeta: Record<string, number> = {};
   const mergedTombstones: Record<string, number> = {};
   let mergeCount = 0;
   const allKeys = new Set<string>([
     ...Object.keys(localNotes),
     ...Object.keys(cloudNotes),
+    ...Object.keys(localOwnerByDate),
+    ...Object.keys(cloudOwnerByDate),
     ...Object.keys(localMeta),
     ...Object.keys(cloudMeta),
     ...Object.keys(localTombstones),
@@ -403,6 +414,8 @@ const mergeNoteRecords = (
     const useCloud = cloudAt >= localAt;
     const chosenAt = useCloud ? cloudAt : localAt;
     const chosenText = useCloud ? cloudText : localText;
+    const chosenOwnerRaw = useCloud ? cloudOwnerByDate[key] : localOwnerByDate[key];
+    const chosenOwner = normCollabEmail(chosenOwnerRaw);
 
     if (localAt > 0 && cloudAt > 0 && localAt !== cloudAt) {
       mergeCount += 1;
@@ -413,6 +426,9 @@ const mergeNoteRecords = (
     if (mergedDelAt > 0) {
       mergedTombstones[key] = mergedDelAt;
     }
+    if (chosenOwner) {
+      mergedOwners[key] = chosenOwner;
+    }
     // 删除墓碑时间新于（或等于）文本更新时间时，文本必须保持空，防止复活。
     if (chosenText.trim() && mergedDelAt < chosenAt) {
       mergedNotes[key] = chosenText;
@@ -421,6 +437,7 @@ const mergeNoteRecords = (
 
   return {
     notesByDate: mergedNotes,
+    noteOwnerByDate: mergedOwners,
     noteMetaByDate: mergedMeta,
     noteTombstonesByDate: mergedTombstones,
     mergeCount,
@@ -507,6 +524,7 @@ export default function App() {
   const [events, setEvents] = useState<CalendarEvent[]>(() => initialEvents);
   const [eventTombstones, setEventTombstones] = useState<Record<string, number>>(persisted?.eventTombstones ?? {});
   const [notesByDate, setNotesByDate] = useState<Record<string, string>>(persisted?.notesByDate ?? {});
+  const [noteOwnerByDate, setNoteOwnerByDate] = useState<Record<string, string>>(persisted?.noteOwnerByDate ?? {});
   const [noteMetaByDate, setNoteMetaByDate] = useState<Record<string, number>>(persisted?.noteMetaByDate ?? {});
   const [noteTombstonesByDate, setNoteTombstonesByDate] = useState<Record<string, number>>(
     persisted?.noteTombstonesByDate ?? {}
@@ -544,11 +562,12 @@ export default function App() {
       currentDate,
       viewType,
       notesByDate,
+      noteOwnerByDate,
       noteMetaByDate,
       noteTombstonesByDate
     );
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  }, [todos, todoTombstones, events, eventTombstones, currentDate, viewType, notesByDate, noteMetaByDate, noteTombstonesByDate]);
+  }, [todos, todoTombstones, events, eventTombstones, currentDate, viewType, notesByDate, noteOwnerByDate, noteMetaByDate, noteTombstonesByDate]);
 
   const getAccountSnapshot = useCallback((): PersistedData => {
     return createPersistedPayload(
@@ -559,10 +578,11 @@ export default function App() {
       currentDate,
       viewType,
       notesByDate,
+      noteOwnerByDate,
       noteMetaByDate,
       noteTombstonesByDate
     );
-  }, [todos, todoTombstones, events, eventTombstones, currentDate, viewType, notesByDate, noteMetaByDate, noteTombstonesByDate]);
+  }, [todos, todoTombstones, events, eventTombstones, currentDate, viewType, notesByDate, noteOwnerByDate, noteMetaByDate, noteTombstonesByDate]);
 
   const getTeamPushSnapshot = useCallback((): PersistedData => {
     const local = getAccountSnapshot();
@@ -641,6 +661,7 @@ export default function App() {
           currentDate,
           viewType,
           notesByDate,
+          noteOwnerByDate,
           noteMetaByDate,
           noteTombstonesByDate
         );
@@ -668,6 +689,7 @@ export default function App() {
     currentDate,
     viewType,
     notesByDate,
+    noteOwnerByDate,
     noteMetaByDate,
     noteTombstonesByDate,
     businessToken,
@@ -740,6 +762,15 @@ export default function App() {
           return;
         }
       }
+      if (isPeerTodoInTeam(workspaceMode, accountEmail, teamOwnerEmail, todo)) {
+        const ok = window.confirm(
+          '这是队友名下的任务（侧栏已用点赞图标标记）。确定要将其安排到日历上吗？此操作会参与协作同步，请谨慎确认。'
+        );
+        if (!ok) {
+          draggedTodoRef.current = null;
+          return;
+        }
+      }
       const evCollab =
         workspaceMode === 'team' && teamOwnerEmail
           ? effectiveTodoOwnerEmail(todo, teamOwnerEmail)
@@ -787,8 +818,9 @@ export default function App() {
   // Set or clear event time on day timeline.
   const handleMoveEvent = useCallback((eventId: string, newTime?: string) => {
     const ev0 = eventsRef.current.find((e) => e.id === eventId);
+    if (!ev0) return;
+    const todoMap = new Map(todosRef.current.map((t) => [t.id, t]));
     if (
-      ev0 &&
       workspaceMode === 'team' &&
       activeTeamId &&
       teamPeerAccess === 'peerReadAllWriteOwn' &&
@@ -796,9 +828,14 @@ export default function App() {
       teamOwnerEmail &&
       normCollabEmail(accountEmail) !== normCollabEmail(teamOwnerEmail)
     ) {
-      const todoMap = new Map(todosRef.current.map((t) => [t.id, t]));
       const o = effectiveEventOwnerEmail(ev0, todoMap, teamOwnerEmail);
       if (o !== normCollabEmail(accountEmail)) return;
+    }
+    if (isPeerEventInTeam(workspaceMode, accountEmail, teamOwnerEmail, ev0, todoMap)) {
+      const ok = window.confirm(
+        '这是队友名下的日程（日历上已用点赞图标标记）。确定要调整时间或拖动到无时间区域吗？此操作会参与协作同步，请谨慎确认。'
+      );
+      if (!ok) return;
     }
     setEvents(prev =>
       prev.map(ev => {
@@ -818,6 +855,7 @@ export default function App() {
     const event = eventsRef.current.find(ev => ev.id === eventId);
     if (!event) return;
 
+    const todoMap = new Map(todosRef.current.map((t) => [t.id, t]));
     if (
       workspaceMode === 'team' &&
       activeTeamId &&
@@ -826,9 +864,15 @@ export default function App() {
       teamOwnerEmail &&
       normCollabEmail(accountEmail) !== normCollabEmail(teamOwnerEmail)
     ) {
-      const todoMap = new Map(todosRef.current.map((t) => [t.id, t]));
       const o = effectiveEventOwnerEmail(event, todoMap, teamOwnerEmail);
       if (o !== normCollabEmail(accountEmail)) return;
+    }
+
+    if (isPeerEventInTeam(workspaceMode, accountEmail, teamOwnerEmail, event, todoMap)) {
+      const ok = window.confirm(
+        '这是队友名下的日程。确定要切换完成/未完成吗？此操作会参与协作同步，请谨慎确认。'
+      );
+      if (!ok) return;
     }
 
     const newCompleted = !event.completed;
@@ -1004,6 +1048,7 @@ export default function App() {
     setEvents(normalizeEventColorsBySourceTodo(defaultEvents, normalizedDefaults));
     setEventTombstones({});
     setNotesByDate({});
+    setNoteOwnerByDate({});
     setNoteMetaByDate({});
     setNoteTombstonesByDate({});
     setShowMonthPicker(false);
@@ -1019,6 +1064,7 @@ export default function App() {
       currentDate,
       viewType,
       notesByDate,
+      noteOwnerByDate,
       noteMetaByDate,
       noteTombstonesByDate
     );
@@ -1029,7 +1075,7 @@ export default function App() {
     anchor.download = `todo-calendar-backup-${toDateKey(new Date())}.json`;
     anchor.click();
     window.URL.revokeObjectURL(url);
-  }, [todos, todoTombstones, events, eventTombstones, currentDate, viewType, notesByDate, noteMetaByDate, noteTombstonesByDate]);
+  }, [todos, todoTombstones, events, eventTombstones, currentDate, viewType, notesByDate, noteOwnerByDate, noteMetaByDate, noteTombstonesByDate]);
 
   const handleImportData = useCallback(async (file: File) => {
     try {
@@ -1053,6 +1099,7 @@ export default function App() {
       setCurrentDate(new Date(parsed.currentDate));
       setViewType(parsed.viewType);
       setNotesByDate(parsed.notesByDate ?? {});
+      setNoteOwnerByDate(parsed.noteOwnerByDate ?? {});
       setNoteMetaByDate(parsed.noteMetaByDate ?? {});
       setNoteTombstonesByDate(parsed.noteTombstonesByDate ?? {});
       setShowMonthPicker(false);
@@ -1064,7 +1111,27 @@ export default function App() {
   }, []);
 
   const handleSaveNote = useCallback((dateKey: string, note: string) => {
+    const normalizedMe = normCollabEmail(accountEmail);
+    const normalizedOwner = normCollabEmail(teamOwnerEmail);
+    const isTeamPeerRestricted =
+      workspaceMode === 'team' &&
+      !!activeTeamId &&
+      teamPeerAccess !== 'bothPush' &&
+      !!normalizedMe &&
+      !!normalizedOwner &&
+      normalizedMe !== normalizedOwner;
+    if (isTeamPeerRestricted) {
+      const noteOwner = normCollabEmail(noteOwnerByDate[dateKey] ?? teamOwnerEmail);
+      if (noteOwner && noteOwner !== normalizedMe) {
+        window.alert('这是队友笔记，当前权限下仅可查看，不能修改。');
+        return;
+      }
+    }
     const now = Date.now();
+    const finalOwner =
+      workspaceMode === 'team' && normalizedMe
+        ? normalizedMe
+        : normCollabEmail(noteOwnerByDate[dateKey]);
     setNotesByDate((prev) => {
       const trimmed = note.trim();
       if (!trimmed) {
@@ -1073,6 +1140,16 @@ export default function App() {
         return rest;
       }
       return { ...prev, [dateKey]: note };
+    });
+    setNoteOwnerByDate((prev) => {
+      if (!note.trim()) {
+        if (!(dateKey in prev)) return prev;
+        const next = { ...prev };
+        delete next[dateKey];
+        return next;
+      }
+      if (!finalOwner) return prev;
+      return { ...prev, [dateKey]: finalOwner };
     });
     setNoteMetaByDate((prev) => ({ ...prev, [dateKey]: now }));
     if (note.trim()) {
@@ -1085,7 +1162,7 @@ export default function App() {
     } else {
       setNoteTombstonesByDate((prev) => ({ ...prev, [dateKey]: now }));
     }
-  }, []);
+  }, [accountEmail, teamOwnerEmail, workspaceMode, activeTeamId, teamPeerAccess, noteOwnerByDate]);
 
   const handleTestNotification = useCallback(async () => {
     try {
@@ -1208,6 +1285,16 @@ export default function App() {
   };
 
   const filteredTodos = getFilteredTodos();
+  const currentDateKey = toDateKey(currentDate);
+  const normalizedMe = normCollabEmail(accountEmail);
+  const currentNoteOwnerEmail = normCollabEmail(noteOwnerByDate[currentDateKey] ?? teamOwnerEmail);
+  const canEditPeerNote =
+    workspaceMode === 'team' && !!activeTeamId && teamPeerAccess === 'bothPush';
+  const isPeerNoteForCurrentDate =
+    workspaceMode === 'team' &&
+    !!accountEmail &&
+    !!teamOwnerEmail &&
+    currentNoteOwnerEmail !== normalizedMe;
 
   const applyAccountSnapshot = useCallback((snapshot: unknown) => {
     if (!isPersistedDataLike(snapshot)) {
@@ -1233,9 +1320,11 @@ export default function App() {
     );
     const mergedNotes = mergeNoteRecords(
       notesByDate,
+      noteOwnerByDate,
       noteMetaByDate,
       noteTombstonesByDate,
       snapshot.notesByDate ?? {},
+      snapshot.noteOwnerByDate ?? {},
       snapshot.noteMetaByDate ?? {},
       snapshot.noteTombstonesByDate ?? {}
     );
@@ -1268,9 +1357,10 @@ export default function App() {
     setCurrentDate(nextDate);
     setViewType(snapshot.viewType);
     setNotesByDate(mergedNotes.notesByDate);
+    setNoteOwnerByDate(mergedNotes.noteOwnerByDate);
     setNoteMetaByDate(mergedNotes.noteMetaByDate);
     setNoteTombstonesByDate(mergedNotes.noteTombstonesByDate);
-  }, [eventTombstones, noteMetaByDate, noteTombstonesByDate, notesByDate, todoTombstones]);
+  }, [eventTombstones, noteMetaByDate, noteOwnerByDate, noteTombstonesByDate, notesByDate, todoTombstones]);
 
   const applyTeamCloudSnapshot = useCallback(
     (teamId: string, snapshot: unknown, version: number) => {
@@ -1418,6 +1508,7 @@ export default function App() {
       setEvents(normalizeEventColorsBySourceTodo(defaultEvents, normalizedDefaults));
       setEventTombstones({});
       setNotesByDate({});
+      setNoteOwnerByDate({});
       setNoteMetaByDate({});
       setNoteTombstonesByDate({});
       setShowMonthPicker(false);
@@ -1513,15 +1604,6 @@ export default function App() {
             <Search className="w-4 h-4" />
             搜索
           </button>
-          <button
-            type="button"
-            onClick={() => setShowAccountLogin(true)}
-            className="px-3 py-2 rounded-lg text-sm font-medium border border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] transition-colors duration-200 flex items-center gap-1"
-            title="账号登录与云端同步（演示）"
-          >
-            <User className="w-4 h-4" />
-            账号
-          </button>
           <span
             className="text-xs text-[var(--shell-text-muted)] max-w-[min(28rem,40vw)] truncate"
             title={accountSyncRuntime}
@@ -1611,9 +1693,16 @@ export default function App() {
           onExportData={handleExportData}
           onImportData={handleImportData}
           onTestNotification={handleTestNotification}
-          noteDateKey={toDateKey(currentDate)}
-          noteContent={notesByDate[toDateKey(currentDate)] ?? ''}
+          noteDateKey={currentDateKey}
+          noteContent={notesByDate[currentDateKey] ?? ''}
+          noteOwnerEmail={currentNoteOwnerEmail || null}
+          isPeerNote={isPeerNoteForCurrentDate}
+          canEditPeerNote={canEditPeerNote}
           onSaveNote={handleSaveNote}
+          workspaceMode={workspaceMode}
+          accountEmail={accountEmail}
+          teamOwnerEmail={teamOwnerEmail}
+          onOpenSettings={() => setShowAccountLogin(true)}
         />
 
         {viewType === 'month' && (
@@ -1626,6 +1715,10 @@ export default function App() {
             onToggleComplete={handleToggleComplete}
             onDayClick={handleDayCellClick}
             notesByDate={notesByDate}
+            todos={todos}
+            workspaceMode={workspaceMode}
+            accountEmail={accountEmail}
+            teamOwnerEmail={teamOwnerEmail}
           />
         )}
 
@@ -1638,6 +1731,10 @@ export default function App() {
             onToggleComplete={handleToggleComplete}
             onDayClick={handleDayCellClick}
             notesByDate={notesByDate}
+            todos={todos}
+            workspaceMode={workspaceMode}
+            accountEmail={accountEmail}
+            teamOwnerEmail={teamOwnerEmail}
           />
         )}
 
@@ -1650,6 +1747,10 @@ export default function App() {
             onToggleComplete={handleToggleComplete}
             onMoveEvent={handleMoveEvent}
             notesByDate={notesByDate}
+            todos={todos}
+            workspaceMode={workspaceMode}
+            accountEmail={accountEmail}
+            teamOwnerEmail={teamOwnerEmail}
           />
         )}
       </div>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Plus, Settings, Pencil, Trash2, Check, X } from 'lucide-react';
+import { Plus, Settings, Pencil, Trash2, Check, X, ThumbsUp } from 'lucide-react';
 import type { TodoItem, ViewType, TodoCategory } from '@/types';
+import { isPeerTodoInTeam } from '@/lib/teamCollab';
 import { getWeekDays, formatDateKey } from '@/lib/calendar-utils';
 
 interface TodoSidebarProps {
@@ -18,7 +19,16 @@ interface TodoSidebarProps {
   onTestNotification: () => void;
   noteDateKey: string;
   noteContent: string;
+  noteOwnerEmail?: string | null;
+  isPeerNote?: boolean;
+  canEditPeerNote?: boolean;
   onSaveNote: (dateKey: string, note: string) => void;
+  /** 协作区：用于在队友任务前显示标记，降低误删风险 */
+  workspaceMode?: 'personal' | 'team';
+  accountEmail?: string | null;
+  teamOwnerEmail?: string | null;
+  /** 打开设置（登录 / 同步 / 协作） */
+  onOpenSettings?: () => void;
 }
 
 const CATEGORY_OPTIONS: { value: TodoCategory; label: string }[] = [
@@ -42,7 +52,14 @@ export default function TodoSidebar({
   onTestNotification,
   noteDateKey,
   noteContent,
+  noteOwnerEmail = null,
+  isPeerNote = false,
+  canEditPeerNote = false,
   onSaveNote,
+  workspaceMode = 'personal',
+  accountEmail = null,
+  teamOwnerEmail = null,
+  onOpenSettings,
 }: TodoSidebarProps) {
   const [newTodoText, setNewTodoText] = useState('');
   const [isAdding, setIsAdding] = useState(false);
@@ -94,7 +111,12 @@ export default function TodoSidebar({
   };
 
   const confirmDeleteTodo = (todo: TodoItem) => {
-    const confirmed = window.confirm(`确定删除任务「${todo.text}」吗？\n关联的日历事件也会一并删除。`);
+    const isPeer = isPeerTodoInTeam(workspaceMode, accountEmail, teamOwnerEmail, todo);
+    const confirmed = window.confirm(
+      isPeer
+        ? `这是队友的任务（侧栏已用点赞图标标记），删除会影响协作数据，请再次确认。\n\n确定删除「${todo.text}」吗？\n关联的日历事件也会一并删除。`
+        : `确定删除任务「${todo.text}」吗？\n关联的日历事件也会一并删除。`
+    );
     if (!confirmed) return;
     onDeleteTodo(todo.id);
   };
@@ -128,6 +150,7 @@ export default function TodoSidebar({
     categoryFilter === 'all'
       ? filteredTodos
       : filteredTodos.filter((todo) => todo.category === categoryFilter);
+  const noteReadOnly = isPeerNote && !canEditPeerNote;
 
   return (
     <div className="w-[320px] flex-shrink-0 flex flex-col h-full bg-[var(--shell-panel)] rounded-xl p-4">
@@ -144,12 +167,23 @@ export default function TodoSidebar({
           <button
             onClick={() => setShowActionsMenu((prev) => !prev)}
             className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[var(--shell-surface-hover)] transition-colors duration-200"
-            title="更多操作"
+            title="设置：账号与同步、导入导出等"
           >
             <Settings className="w-5 h-5 text-[var(--shell-icon)]" />
           </button>
           {showActionsMenu && (
-            <div className="absolute right-0 top-10 z-50 w-44 rounded-lg border border-[var(--shell-border-subtle)] bg-[var(--shell-menu-bg)] p-1 shadow-xl">
+            <div className="absolute right-0 top-10 z-50 w-48 rounded-lg border border-[var(--shell-border-subtle)] bg-[var(--shell-menu-bg)] p-1 shadow-xl">
+              {onOpenSettings ? (
+                <button
+                  onClick={() => {
+                    onOpenSettings();
+                    setShowActionsMenu(false);
+                  }}
+                  className="w-full text-left px-3 py-2 text-xs rounded-md text-[var(--shell-text-strong)] hover:bg-[var(--shell-surface-hover)] transition-colors font-medium"
+                >
+                  账号与同步…
+                </button>
+              ) : null}
               <button
                 onClick={() => {
                   onExportData();
@@ -271,6 +305,7 @@ export default function TodoSidebar({
             const isEmptyCount = todo.count === null;
             const canDrag = isEmptyCount || count > 0;
             const isMuted = !canDrag && !isEmptyCount;
+            const isPeer = isPeerTodoInTeam(workspaceMode, accountEmail, teamOwnerEmail, todo);
             return (
           <div
             key={todo.id}
@@ -281,7 +316,15 @@ export default function TodoSidebar({
               ${canDrag ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed'}
               ${isMuted ? 'opacity-40' : ''}
             `}
+            title={isPeer ? '队友的任务（请谨慎修改或删除）' : undefined}
           >
+            {isPeer ? (
+              <ThumbsUp
+                className="mt-2 h-3.5 w-3.5 shrink-0 text-amber-500 dark:text-amber-400"
+                strokeWidth={2.25}
+                aria-label="队友任务"
+              />
+            ) : null}
             <span
               className="w-2 h-2 rounded-full flex-shrink-0 mt-2"
               style={{ backgroundColor: canDrag || isEmptyCount ? todo.color : 'var(--shell-faint)' }}
@@ -386,15 +429,25 @@ export default function TodoSidebar({
 
       <div className="mt-4 pt-4 border-t border-[var(--shell-border-subtle)]">
         <div className="text-sm text-[var(--shell-text-strong)] mb-2">笔记（{noteDateKey}）</div>
+        {isPeerNote ? (
+          <div className="mb-2 flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-300">
+            <ThumbsUp className="h-3.5 w-3.5" strokeWidth={2.25} aria-hidden />
+            <span>
+              队友笔记{noteOwnerEmail ? `：${noteOwnerEmail}` : ''}（即使有编辑权限也请慎重修改）
+            </span>
+          </div>
+        ) : null}
         <textarea
           value={noteDraft}
           onChange={(e) => setNoteDraft(e.target.value)}
           placeholder="写下今天的工作日记、笔记或感悟..."
+          disabled={noteReadOnly}
           className="w-full min-h-[92px] px-3 py-2 bg-[var(--shell-input-bg)] border border-[var(--shell-border-subtle)] rounded-lg text-[var(--shell-text-strong)] text-sm placeholder-[var(--shell-placeholder)] focus:outline-none focus:border-[var(--shell-accent)] resize-y"
         />
         <div className="mt-2 flex gap-2">
           <button
             onClick={() => onSaveNote(noteDateKey, noteDraft)}
+            disabled={noteReadOnly}
             className="flex-1 px-3 py-2 text-xs rounded-md bg-[var(--shell-accent)] text-[var(--shell-accent-contrast)] font-medium hover:bg-[var(--shell-accent-hover)] transition-colors"
           >
             保存笔记

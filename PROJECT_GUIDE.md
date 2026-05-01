@@ -22,7 +22,7 @@
   CloudBase 环境、HTTP 路径、账号本地键；**工作区** `WORKSPACE_MODE_KEY` / `ACTIVE_TEAM_ID_KEY`；协作版控 `teamBaseVersionStorageKey`、首次协作拉取 `teamFirstPullDoneKey`。
 
 - `src/features/account/authApi.ts`  
-  `postAccountAction` 及个人云 `pull`/`push`；**协作** `teamCreate` / `teamJoin` / `teamLeave` / `teamGet` / `teamPull` / `teamPush` / `teamSetPeerReadOnly`。
+  `postAccountAction` 及个人云 `pull`/`push`；**协作** `teamCreate` / `teamJoin` / `teamLeave` / `teamGet` / `teamPull` / `teamPush` / `teamSetPeerAccess`（兼容保留 `teamSetPeerReadOnly`）。
 
 - `cloudfunctions/newworld/index.js`  
   云函数：发码、验码、个人快照、历史、**协作** `team_*`；协作集合 **`team_snapshots`**；`peerReadOnly` 时仅 `ownerEmail` 可 `team-push`；`snapshot` 为 `null` 时用 **`_.set(snapshotForStore(...))`** 写入。
@@ -85,8 +85,10 @@
 
 ### 2.4 笔记（按日期）
 - 状态：`App.tsx` 的 `notesByDate`
+- 归属：`App.tsx` 的 `noteOwnerByDate`（协作模式用于“按人分权”）
 - 保存：`handleSaveNote(...)`
 - 输入区域：`TodoSidebar.tsx`
+- 队友笔记提醒：第一行固定显示 👍 文案；在不可改权限下自动只读
 - 标记显示：
   - `CalendarGrid.tsx`
   - `WeekView.tsx`
@@ -210,7 +212,7 @@
 
 | 按钮/动作 | 先看文件 | 关键函数/入口 | 最终调用 |
 |---|---|---|---|
-| 顶部「账号」 | `src/App.tsx` | `setShowAccountLogin(true)` | 打开 `AccountLoginModal` |
+| 侧栏齿轮「账号与同步…」 | `src/TodoSidebar.tsx` → `App.tsx` | `onOpenSettings` → `setShowAccountLogin(true)` | 打开设置弹窗 `AccountLoginModal`（登录 / 同步与云 / 协作） |
 | 发送验证码 | `src/features/account/AccountLoginModal.tsx` | `handleSend()` | `useSharedAccountAuth().sendCode()` -> `authApi.sendCode()` -> `/test` `action=send-code` |
 | 验证并登录 | `src/features/account/AccountLoginModal.tsx` | `handleVerify()` | `verify()` 成功后 **自动拉取**：个人云 `pullSnapshot` + `onPullSnapshot` 并写 **`todo-calendar-first-pull-done`**；协作云 **`team-pull`** + `onTeamCloudPulled`；协作自动拉取失败时提示 **必须手动拉** |
 | 退出业务登录 | `AccountLoginModal.tsx` | `executeLogout(clearLocal)` | 点「退出业务登录」后先选：**退出并清空本机日历数据** 或 **仅退出账号，保留本地数据**（可取消）。再 **尝试推送**（个人 `pushSnapshot` / 协作 `teamPush`）；成功 **alert 已同步** 后 `logout()`；失败 **`confirm` 是否仍退出**。若选清空，登出后 **`App.tsx` `handleAfterLogout`** 会删 `todo-calendar-local-v1`、协作/工作区相关 `localStorage` 键并重置界面为默认日历数据 |
@@ -298,7 +300,7 @@
 - `user_snapshots` 除原有 `email`、`snapshot`、`version`、`updatedAt` 等外，增加 **`dbAuthUid`**（与邮箱规范化后 SHA-256 前 32 位十六进制一致），供规则 `doc.dbAuthUid == auth.uid` 使用。  
 - 云函数在 **验码、pull、push** 路径会 **补齐** 旧文档的 `dbAuthUid`。
 
-- **`team_snapshots`（双人协作，v0.2.0）**：按 **`teamId`** 一条文档；字段含 `members`（最多 2 人）、`ownerEmail`、`peerReadOnly`（true 时仅创建者可 `team-push`）、`snapshot`、`version` 等。与个人云 **不自动同步**，切换工作区时分别 `pull` 对应数据源。
+- **`team_snapshots`（双人协作，v0.2.0）**：按 **`teamId`** 一条文档；字段含 `members`（最多 2 人）、`ownerEmail`、`peerAccess`（`bothPush` / `peerReadOnly` / `peerReadAllWriteOwn`）、`snapshot`、`version` 等。与个人云 **不自动同步**，切换工作区时分别 `pull` 对应数据源。**协作文档无 TTL**：只要空间未被「最后一人退出并删除」，凭 **协作 ID** 在 **邮箱验码登录** 后可长期再次 `team-join` / `team-pull` 查看。业务 **`user_tokens`** 有效期见云函数 `TOKEN_TTL_MS`（当前为 **7 天**，过期后重新收码登录即可，协作数据仍在库中）。
 
 ### 10.3 前端关键约定
 
@@ -311,8 +313,11 @@
 ### 11.1 产品语义
 
 - **个人云**：数据在 `user_snapshots`（按邮箱），仅本人默认语义下的私有同步。  
-- **协作云**：数据在 `team_snapshots`（按 `teamId`），两人共享**同一份** `snapshot`（MVP 最多 2 人）。两套云 **互不自动合并**，切换工作区会改「当前跟哪朵云对齐」。  
-- **队友权限**：创建者可在账号弹窗选择 **对方可读写** / **对方只读**（`peerReadOnly`）；只读成员不可 `team-push`，也不可开协作自动推送。
+- **协作云**：数据在 `team_snapshots`（按 `teamId`），两人共享**同一份** `snapshot`（MVP 最多 2 人）。两套云 **互不自动合并**，切换工作区会改「当前跟哪朵云对齐」。**协作 ID / 云端内容长期有效**（无自动过期）；仅当全员退出且删除空间后 ID 才失效。  
+- **队友权限**：创建者可在账号弹窗选择 **对方可读写**（`bothPush`）/ **对方只读**（`peerReadOnly`）/ **对方读全写己**（`peerReadAllWriteOwn`）。
+  - `bothPush`：可跨人编辑任务/笔记（队友笔记仍显示 👍 慎改提醒）。
+  - `peerReadOnly`：队友只能拉取，不能推送协作云。
+  - `peerReadAllWriteOwn`：队友可读全部，但仅可修改自己名下任务/日程/笔记。
 
 ### 11.2 云函数 action 一览（协作）
 
@@ -321,10 +326,10 @@
 | `team-create` | 创建协作空间，返回 `teamId` |
 | `team-join` | 加入指定 `teamId` |
 | `team-leave` | 退出；最后一人退出可删除文档 |
-| `team-get` | 元数据（成员、`peerReadOnly`、`version` 等） |
+| `team-get` | 元数据（成员、`peerAccess`、`ownerEmail`、`version` 等） |
 | `team-pull` | 拉取协作快照 |
 | `team-push` | 推送协作快照（409 版本冲突同个人云） |
-| `team-set-peer-read-only` | 仅创建者可调 |
+| `team-set-peer-access` | 仅创建者可调 |
 
 ### 11.3 运维注意
 

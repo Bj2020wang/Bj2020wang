@@ -11,6 +11,7 @@ export interface TeamPersistedSnapshot {
   currentDate: string;
   viewType: ViewType;
   notesByDate: Record<string, string>;
+  noteOwnerByDate?: Record<string, string>;
   noteMetaByDate?: Record<string, number>;
   noteTombstonesByDate?: Record<string, number>;
   eventsByDate?: Record<string, string[]>;
@@ -49,6 +50,30 @@ export function effectiveEventOwnerEmail(
   return normCollabEmail(teamOwnerEmail);
 }
 
+/** 协作区内：该项归属队友（非当前登录邮箱）时用于 UI 区分，避免与本人任务混淆 */
+export function isPeerTodoInTeam(
+  workspaceMode: 'personal' | 'team',
+  accountEmail: string | null | undefined,
+  teamOwnerEmail: string | null | undefined,
+  todo: TodoItem
+): boolean {
+  if (workspaceMode !== 'team' || !teamOwnerEmail || !accountEmail) return false;
+  return effectiveTodoOwnerEmail(todo, teamOwnerEmail) !== normCollabEmail(accountEmail);
+}
+
+/** 日程块：节假日等系统事件不标队友；其余按归属邮箱判断 */
+export function isPeerEventInTeam(
+  workspaceMode: 'personal' | 'team',
+  accountEmail: string | null | undefined,
+  teamOwnerEmail: string | null | undefined,
+  event: CalendarEvent,
+  todoById: Map<string, TodoItem>
+): boolean {
+  if (event.id.startsWith('holiday-')) return false;
+  if (workspaceMode !== 'team' || !teamOwnerEmail || !accountEmail) return false;
+  return effectiveEventOwnerEmail(event, todoById, teamOwnerEmail) !== normCollabEmail(accountEmail);
+}
+
 function addDays(dateStr: string, days: number): string {
   const [y, m, d] = dateStr.split('-').map(Number);
   const date = new Date(y, m - 1, d);
@@ -73,7 +98,7 @@ function buildEventsByDate(events: CalendarEvent[]): Record<string, string[]> {
 }
 
 /**
- * 队友在 peerReadAllWriteOwn 下组装推送快照：非本人 Todo/事件与基线一致；笔记整份沿用基线（第一版不按笔记分权）。
+ * 队友在 peerReadAllWriteOwn 下组装推送快照：非本人 Todo/事件/笔记与基线一致。
  */
 export function buildWriteOwnTeamSnapshot(
   local: TeamPersistedSnapshot,
@@ -167,6 +192,53 @@ export function buildWriteOwnTeamSnapshot(
   const evTombKeys = new Set(Object.keys(mergedEvTombs));
   const eventsOut = mergedEvents.filter((e) => !evTombKeys.has(e.id));
 
+  const baseNotes = baseline.notesByDate && typeof baseline.notesByDate === 'object' ? baseline.notesByDate : {};
+  const locNotes = local.notesByDate && typeof local.notesByDate === 'object' ? local.notesByDate : {};
+  const baseNoteOwners =
+    baseline.noteOwnerByDate && typeof baseline.noteOwnerByDate === 'object' ? baseline.noteOwnerByDate : {};
+  const locNoteOwners =
+    local.noteOwnerByDate && typeof local.noteOwnerByDate === 'object' ? local.noteOwnerByDate : {};
+  const baseNoteMeta =
+    baseline.noteMetaByDate && typeof baseline.noteMetaByDate === 'object' ? baseline.noteMetaByDate : {};
+  const locNoteMeta = local.noteMetaByDate && typeof local.noteMetaByDate === 'object' ? local.noteMetaByDate : {};
+  const baseNoteTombs =
+    baseline.noteTombstonesByDate && typeof baseline.noteTombstonesByDate === 'object'
+      ? baseline.noteTombstonesByDate
+      : {};
+  const locNoteTombs =
+    local.noteTombstonesByDate && typeof local.noteTombstonesByDate === 'object'
+      ? local.noteTombstonesByDate
+      : {};
+  const allNoteDates = new Set<string>([
+    ...Object.keys(baseNotes),
+    ...Object.keys(locNotes),
+    ...Object.keys(baseNoteOwners),
+    ...Object.keys(locNoteOwners),
+    ...Object.keys(baseNoteMeta),
+    ...Object.keys(locNoteMeta),
+    ...Object.keys(baseNoteTombs),
+    ...Object.keys(locNoteTombs),
+  ]);
+  const notesOut: Record<string, string> = {};
+  const noteOwnerOut: Record<string, string> = {};
+  const noteMetaOut: Record<string, number> = {};
+  const noteTombOut: Record<string, number> = {};
+
+  for (const dateKey of allNoteDates) {
+    const baseOwner = normCollabEmail(baseNoteOwners[dateKey] ?? teamOwnerEmail);
+    const locOwner = normCollabEmail(locNoteOwners[dateKey] ?? baseOwner);
+    const ownerForDate = baseOwner || locOwner || normCollabEmail(teamOwnerEmail);
+    const chooseLocal = ownerForDate === w;
+    const chosenText = chooseLocal ? locNotes[dateKey] ?? '' : baseNotes[dateKey] ?? '';
+    const chosenMeta = chooseLocal ? locNoteMeta[dateKey] : baseNoteMeta[dateKey];
+    const chosenTomb = chooseLocal ? locNoteTombs[dateKey] : baseNoteTombs[dateKey];
+
+    if (typeof chosenMeta === 'number' && Number.isFinite(chosenMeta)) noteMetaOut[dateKey] = chosenMeta;
+    if (typeof chosenTomb === 'number' && Number.isFinite(chosenTomb)) noteTombOut[dateKey] = chosenTomb;
+    if (typeof chosenText === 'string' && chosenText.trim()) notesOut[dateKey] = chosenText;
+    if (ownerForDate) noteOwnerOut[dateKey] = ownerForDate;
+  }
+
   return {
     todos: todosOut,
     todoTombstones: mergedTombs,
@@ -175,9 +247,10 @@ export function buildWriteOwnTeamSnapshot(
     currentDate: local.currentDate,
     viewType: local.viewType,
     eventsByDate: buildEventsByDate(eventsOut),
-    notesByDate: { ...baseline.notesByDate },
-    noteMetaByDate: baseline.noteMetaByDate ? { ...baseline.noteMetaByDate } : {},
-    noteTombstonesByDate: baseline.noteTombstonesByDate ? { ...baseline.noteTombstonesByDate } : {},
+    notesByDate: notesOut,
+    noteOwnerByDate: noteOwnerOut,
+    noteMetaByDate: noteMetaOut,
+    noteTombstonesByDate: noteTombOut,
     updatedAt: Date.now(),
   };
 }

@@ -614,7 +614,7 @@ async function handleRestoreHistory(payload) {
   });
 }
 
-/** ---------- 双人协作空间（MVP：最多 2 人，共享一份 snapshot / version） ---------- */
+/** ---------- 双人协作空间（MVP：最多 2 人，共享一份 snapshot / version；文档无自动过期，凭 teamId 在验码登录后可长期加入/拉取） ---------- */
 
 function generateTeamId() {
   return randomToken().slice(0, 16);

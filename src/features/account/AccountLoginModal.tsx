@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { ThumbsUp, X } from 'lucide-react';
 import { useSharedAccountAuth } from './AccountAuthContext';
 import * as authApi from './authApi';
 import { AccountSyncConflictError } from './authApi';
@@ -20,6 +20,8 @@ const ACCOUNT_LAST_PULL_AT_KEY = 'todo-calendar-account-last-pull-at';
 const ACCOUNT_LAST_PUSH_AT_KEY = 'todo-calendar-account-last-push-at';
 /** watch 不可用时用云函数 pull 轮询兜底（与手动「拉取云端」同路径，不依赖前端库可读） */
 const SNAPSHOT_POLL_INTERVAL_MS = 15_000;
+
+type SettingsTab = 'login' | 'sync' | 'team';
 
 function formatSyncShortTime(ts: number | null): string {
   if (ts == null) return '—';
@@ -130,8 +132,9 @@ export default function AccountLoginModal({
   });
   const [pollFallbackActive, setPollFallbackActive] = useState(false);
   const [logoutChoiceOpen, setLogoutChoiceOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('login');
   const [teamJoinId, setTeamJoinId] = useState('');
-  const [teamMembersHint, setTeamMembersHint] = useState('');
+  const [teamMemberEmails, setTeamMemberEmails] = useState<string[]>([]);
   const lastActivityAtRef = useRef(Date.now());
   const lastAutoPushAtRef = useRef(0);
   const lastSyncActionAtRef = useRef(0);
@@ -165,6 +168,11 @@ export default function AccountLoginModal({
   useEffect(() => {
     if (!open) setLogoutChoiceOpen(false);
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setSettingsTab(businessToken ? 'sync' : 'login');
+  }, [open, businessToken]);
 
   /** 云端 user_snapshots 变更实时合并（需验码后拿到 customLoginTicket 且控制台配置好库权限） */
   useEffect(() => {
@@ -368,7 +376,7 @@ export default function AccountLoginModal({
 
   useEffect(() => {
     if (!open || !businessToken || workspaceMode !== 'team' || !activeTeamId) {
-      if (!open) setTeamMembersHint('');
+      if (!open) setTeamMemberEmails([]);
       return;
     }
     let cancelled = false;
@@ -376,7 +384,7 @@ export default function AccountLoginModal({
       .teamGet(businessToken, activeTeamId)
       .then((res) => {
         if (cancelled) return;
-        setTeamMembersHint((res.data?.members ?? []).join(', '));
+        setTeamMemberEmails(res.data?.members ?? []);
         onTeamWorkspaceMeta?.({
           peerAccess: normalizeTeamPeerAccess(res.data?.peerAccess, res.data?.peerReadOnly),
           ownerEmail: typeof res.data?.ownerEmail === 'string' ? res.data.ownerEmail : null,
@@ -604,7 +612,7 @@ export default function AccountLoginModal({
       const res = await authApi.teamCreate(businessToken);
       const id = res.data?.teamId;
       if (!id) throw new Error('未返回 teamId');
-      setTeamMembersHint((res.data?.members ?? []).join(', '));
+      setTeamMemberEmails(res.data?.members ?? []);
       await onSwitchToTeamWorkspace(id);
       setHint(`已创建协作空间，ID：${id}（可复制给队友加入）`);
       setTeamJoinId('');
@@ -633,7 +641,7 @@ export default function AccountLoginModal({
     setBusy(true);
     try {
       const res = await authApi.teamJoin(businessToken, tid);
-      setTeamMembersHint((res.data?.members ?? []).join(', '));
+      setTeamMemberEmails(res.data?.members ?? []);
       await onSwitchToTeamWorkspace(tid);
       setHint(res.data?.alreadyMember ? '已在该协作空间，已切换' : '已加入并切换到协作空间');
     } catch (e) {
@@ -675,11 +683,18 @@ export default function AccountLoginModal({
         '若只想切回个人云、不删除协作空间，请点「取消」，改用「切回个人云」。';
     }
     if (!window.confirm(confirmMsg)) return;
+    if (isTeamOwner) {
+      const second =
+        '【创建者二次确认】您是本协作空间的创建者，退出后将失去成员身份；若当前仅剩您一人，云端会删除该协作空间且协作 ID 永久失效。\n\n' +
+        '若只想暂时使用个人云而不退出协作，请点「取消」，改用「切回个人云」。\n\n' +
+        '确定仍要退出协作吗？';
+      if (!window.confirm(second)) return;
+    }
     setBusy(true);
     try {
       await authApi.teamLeave(businessToken, activeTeamId);
       setTeamJoinId('');
-      setTeamMembersHint('');
+      setTeamMemberEmails([]);
       await onSwitchToPersonalWorkspace?.({ skipTeamFlush: true });
       setHint('已退出协作空间');
     } catch (e) {
@@ -706,7 +721,7 @@ export default function AccountLoginModal({
         bothPush: '已设为「对方可读写」：双方均可推送到协作云端',
         peerReadOnly: '已设为「对方只读」：队友可拉取、不可推送到协作云端',
         peerReadAllWriteOwn:
-          '已设为「对方读全、写己」：队友可拉取全部任务，推送时仅同步本人任务与对应日程（笔记仍按云端合并）',
+          '已设为「对方读全、写己」：队友可拉取全部任务，推送时仅同步本人任务、对应日程与本人笔记',
       };
       setHint(hints[next]);
     } catch (e) {
@@ -1074,76 +1089,149 @@ export default function AccountLoginModal({
     }
   };
 
+  const tabBtn = (t: SettingsTab) =>
+    `rounded-t-lg px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap ${
+      settingsTab === t
+        ? 'border-[var(--shell-accent)] text-[var(--shell-accent)]'
+        : 'border-transparent text-[var(--shell-text-muted)] hover:text-[var(--shell-text-strong)]'
+    }`;
+
+  const needLoginPanel = (
+    <div className="rounded-lg border border-dashed border-[var(--shell-border-subtle)] bg-[var(--shell-elevated)] p-6 text-center space-y-3">
+      <p className="text-sm text-[var(--shell-text-muted)]">此分类需要先完成邮箱验证登录。</p>
+      <button
+        type="button"
+        onClick={() => setSettingsTab('login')}
+        className="rounded-lg bg-[var(--shell-accent)] px-4 py-2 text-sm font-medium text-[var(--shell-accent-contrast)] hover:bg-[var(--shell-accent-hover)]"
+      >
+        去「登录」
+      </button>
+    </div>
+  );
+
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
       <div
-        className="relative w-full max-w-md rounded-xl border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] shadow-xl"
+        className="relative flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] shadow-xl"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="account-login-title"
+        aria-labelledby="settings-modal-title"
       >
         <button
           type="button"
           onClick={onClose}
-          className="absolute right-3 top-3 rounded-lg p-1 text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] hover:text-[var(--shell-text-strong)]"
+          className="absolute right-3 top-3 z-10 rounded-lg p-1 text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] hover:text-[var(--shell-text-strong)]"
           aria-label="关闭"
         >
           <X className="h-5 w-5" />
         </button>
 
-        <div className="border-b border-[var(--shell-border-subtle)] px-5 py-4">
-          <h2 id="account-login-title" className="text-lg font-semibold text-[var(--shell-text-strong)]">
-            账号（邮箱验证码）
+        <div className="border-b border-[var(--shell-border-subtle)] px-5 py-4 pr-12">
+          <h2 id="settings-modal-title" className="text-lg font-semibold text-[var(--shell-text-strong)]">
+            设置
           </h2>
           <p className="mt-1 text-xs text-[var(--shell-text-muted)]">
-            首次会先匿名登录 CloudBase，再调用云端接口；业务 token 仅存本会话。
+            登录、云端同步与双人协作。首次会先匿名登录 CloudBase；业务 token 仅存本会话。
           </p>
         </div>
 
-        <div className="space-y-3 px-5 py-4">
-          {businessToken ? (
-            <div className="rounded-lg bg-[var(--shell-surface-hover)] px-3 py-2 text-sm text-emerald-300">
-              当前已登录（业务会话）
-            </div>
-          ) : null}
+        <div className="flex flex-wrap gap-1 border-b border-[var(--shell-border-subtle)] px-3">
+          <button type="button" className={tabBtn('login')} onClick={() => setSettingsTab('login')}>
+            登录
+          </button>
+          <button type="button" className={tabBtn('sync')} onClick={() => setSettingsTab('sync')}>
+            同步与云
+          </button>
+          <button type="button" className={tabBtn('team')} onClick={() => setSettingsTab('team')}>
+            协作
+          </button>
+        </div>
 
-          <label className="block text-xs font-medium text-[var(--shell-text-muted)]">
-            邮箱
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[var(--shell-border)] bg-[var(--shell-elevated)] px-3 py-2 text-sm text-[var(--shell-text-strong)] outline-none focus:border-[var(--shell-accent)]"
-              placeholder="you@example.com"
-              autoComplete="email"
-              disabled={busy}
-            />
-          </label>
-
-          <div className="flex gap-2">
-            <label className="block flex-1 text-xs font-medium text-[var(--shell-text-muted)]">
-              验证码
-              <input
-                type="text"
-                inputMode="numeric"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-[var(--shell-border)] bg-[var(--shell-elevated)] px-3 py-2 text-sm text-[var(--shell-text-strong)] outline-none focus:border-[var(--shell-accent)]"
-                placeholder="6 位数字"
-                disabled={busy}
-              />
-            </label>
+        {(error || hint || syncStatus) ? (
+          <div
+            className={`border-b border-[var(--shell-border-subtle)] px-5 py-2 text-sm ${
+              error ? 'text-red-400' : 'text-[var(--shell-text-muted)]'
+            }`}
+          >
+            {error || hint || syncStatus}
           </div>
+        ) : null}
 
-          {(error || hint || syncStatus) && (
-            <p className={`text-sm ${error ? 'text-red-400' : 'text-[var(--shell-text-muted)]'}`}>
-              {error || hint || syncStatus}
-            </p>
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
+          {settingsTab === 'login' && (
+            <div className="space-y-3">
+              {businessToken ? (
+                <div className="space-y-2">
+                  <div className="rounded-lg bg-[var(--shell-surface-hover)] px-3 py-2 text-sm text-emerald-300">
+                    当前已登录（业务会话）
+                  </div>
+                  {accountEmail ? (
+                    <p className="text-xs text-[var(--shell-text-muted)]">登录邮箱：{accountEmail}</p>
+                  ) : null}
+                  <p className="text-xs text-[var(--shell-text-muted)]">
+                    拉取/推送、自动同步与退出请在「同步与云」；双人协作请在「协作」。
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <label className="block text-xs font-medium text-[var(--shell-text-muted)]">
+                    邮箱
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-[var(--shell-border)] bg-[var(--shell-elevated)] px-3 py-2 text-sm text-[var(--shell-text-strong)] outline-none focus:border-[var(--shell-accent)]"
+                      placeholder="you@example.com"
+                      autoComplete="email"
+                      disabled={busy}
+                    />
+                  </label>
+                  <div className="flex gap-2">
+                    <label className="block flex-1 text-xs font-medium text-[var(--shell-text-muted)]">
+                      验证码
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={code}
+                        onChange={(e) => setCode(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-[var(--shell-border)] bg-[var(--shell-elevated)] px-3 py-2 text-sm text-[var(--shell-text-strong)] outline-none focus:border-[var(--shell-accent)]"
+                        placeholder="6 位数字"
+                        disabled={busy}
+                      />
+                    </label>
+                  </div>
+                </>
+              )}
+              {!businessToken ? (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={handleSend}
+                    className="rounded-lg bg-[var(--shell-border)] px-4 py-2 text-sm font-medium text-[var(--shell-text-strong)] hover:bg-[var(--shell-faint)] disabled:opacity-50"
+                  >
+                    发送验证码
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={handleVerify}
+                    className="rounded-lg bg-[var(--shell-accent)] px-4 py-2 text-sm font-medium text-[var(--shell-accent-contrast)] hover:bg-[var(--shell-accent-hover)] disabled:opacity-50"
+                  >
+                    验证并登录
+                  </button>
+                </div>
+              ) : null}
+            </div>
           )}
 
-          {businessToken ? (
+          {settingsTab === 'sync' &&
+            (!businessToken ? (
+              needLoginPanel
+            ) : (
+              <div className="space-y-3">
             <label className="flex items-center gap-2 text-xs text-[var(--shell-text-muted)]">
               <input
                 type="checkbox"
@@ -1175,19 +1263,17 @@ export default function AccountLoginModal({
               />
               开启空闲自动推送（空闲 30 秒，最短间隔 60 秒）
             </label>
-          ) : null}
 
-          {businessToken && !hasPulledOnce && workspaceMode !== 'team' ? (
+          {!hasPulledOnce && workspaceMode !== 'team' ? (
             <p className="text-xs text-amber-300">首次登录请先拉取云端，避免自动推送覆盖云端数据。</p>
           ) : null}
-          {businessToken && workspaceMode === 'team' && activeTeamId && typeof window !== 'undefined' && window.localStorage.getItem(teamFirstPullDoneKey(activeTeamId)) !== '1' ? (
+          {workspaceMode === 'team' && activeTeamId && typeof window !== 'undefined' && window.localStorage.getItem(teamFirstPullDoneKey(activeTeamId)) !== '1' ? (
             <p className="text-xs text-amber-300">协作空间请先「拉取协作云端」一次，再开启自动推送。</p>
           ) : null}
-          {businessToken && workspaceMode === 'team' && activeTeamId && teamPushForbidden ? (
+          {workspaceMode === 'team' && activeTeamId && teamPushForbidden ? (
             <p className="text-xs text-amber-300">当前为「对方只读」：你可拉取协作内容；推送到协作云端仅创建者可用。</p>
           ) : null}
-          {businessToken &&
-          workspaceMode === 'team' &&
+          {workspaceMode === 'team' &&
           activeTeamId &&
           teamPeerAccess === 'peerReadAllWriteOwn' &&
           !isTeamOwner ? (
@@ -1196,138 +1282,16 @@ export default function AccountLoginModal({
             </p>
           ) : null}
 
-          {businessToken && autoPushEnabled ? (
+          {autoPushEnabled ? (
             <p className="text-xs text-[var(--shell-text-muted)]">
               上次自动推送时间：{formatTime(lastAutoPushAt)}
             </p>
           ) : null}
-          {businessToken ? (
-            <p className="text-xs text-[var(--shell-text-muted)]">上次拉取时间：{formatTime(lastPullAt)}</p>
-          ) : null}
-          {businessToken ? (
-            <p className="text-xs text-[var(--shell-text-muted)]">上次推送时间：{formatTime(lastPushAt)}</p>
-          ) : null}
 
-          {businessToken ? (
-            <div className="rounded-lg border border-[var(--shell-border-subtle)] bg-[var(--shell-elevated)] p-3 space-y-2">
-              <p className="text-xs font-medium text-[var(--shell-text-muted)]">双人协作（MVP，最多 2 人）</p>
-              <p className="text-xs text-[var(--shell-text-muted)]">
-                当前工作区：
-                {workspaceMode === 'team' && activeTeamId ? (
-                  <span className="text-emerald-300"> 协作 · {activeTeamId}</span>
-                ) : (
-                  <span> 个人云</span>
-                )}
-              </p>
-              {workspaceMode === 'team' && activeTeamId && teamMembersHint ? (
-                <p className="text-xs text-[var(--shell-text-muted)]">成员：{teamMembersHint}</p>
-              ) : null}
-              {workspaceMode === 'team' && activeTeamId && isTeamOwner ? (
-                <div className="space-y-1 rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] p-2">
-                  <p className="text-xs font-medium text-[var(--shell-text-muted)]">队友权限（仅创建者）</p>
-                  <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--shell-text-strong)]">
-                    <input
-                      type="radio"
-                      name="team-peer-mode"
-                      checked={teamPeerAccess === 'bothPush'}
-                      onChange={() => void handleSetTeamPeerAccess('bothPush')}
-                      disabled={busy}
-                    />
-                    对方可读写（双方均可推送到协作云端）
-                  </label>
-                  <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--shell-text-strong)]">
-                    <input
-                      type="radio"
-                      name="team-peer-mode"
-                      checked={teamPeerAccess === 'peerReadOnly'}
-                      onChange={() => void handleSetTeamPeerAccess('peerReadOnly')}
-                      disabled={busy}
-                    />
-                    对方只读（队友仅可拉取，不可推送）
-                  </label>
-                  <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--shell-text-strong)]">
-                    <input
-                      type="radio"
-                      name="team-peer-mode"
-                      checked={teamPeerAccess === 'peerReadAllWriteOwn'}
-                      onChange={() => void handleSetTeamPeerAccess('peerReadAllWriteOwn')}
-                      disabled={busy}
-                    />
-                    对方可读全部、仅写自己的任务（笔记第一版不按人分权）
-                  </label>
-                </div>
-              ) : null}
-              <label className="block text-xs font-medium text-[var(--shell-text-muted)]">
-                协作空间 ID（加入）
-                <input
-                  type="text"
-                  value={teamJoinId}
-                  onChange={(e) => setTeamJoinId(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-[var(--shell-border)] bg-[var(--shell-panel)] px-3 py-2 text-sm text-[var(--shell-text-strong)] outline-none focus:border-[var(--shell-accent)]"
-                  placeholder="队友发给你的 ID"
-                  disabled={busy}
-                />
-              </label>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={handleTeamCreate}
-                  className="rounded-lg border border-[var(--shell-border)] px-3 py-1.5 text-xs text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
-                >
-                  创建协作空间
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={handleTeamJoin}
-                  className="rounded-lg border border-[var(--shell-border)] px-3 py-1.5 text-xs text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
-                >
-                  加入并切换
-                </button>
-                {workspaceMode === 'team' && activeTeamId ? (
-                  <>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={handleSwitchToPersonalOnly}
-                      className="rounded-lg border border-[var(--shell-border)] px-3 py-1.5 text-xs text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
-                    >
-                      切回个人云
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={handleTeamLeave}
-                      className="rounded-lg border border-amber-700/50 px-3 py-1.5 text-xs text-amber-200 hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
-                    >
-                      退出协作
-                    </button>
-                  </>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
+            <p className="text-xs text-[var(--shell-text-muted)]">上次拉取时间：{formatTime(lastPullAt)}</p>
+            <p className="text-xs text-[var(--shell-text-muted)]">上次推送时间：{formatTime(lastPushAt)}</p>
 
           <div className="flex flex-wrap gap-2 pt-1">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={handleSend}
-              className="rounded-lg bg-[var(--shell-border)] px-4 py-2 text-sm font-medium text-[var(--shell-text-strong)] hover:bg-[var(--shell-faint)] disabled:opacity-50"
-            >
-              发送验证码
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={handleVerify}
-              className="rounded-lg bg-[var(--shell-accent)] px-4 py-2 text-sm font-medium text-[var(--shell-accent-contrast)] hover:bg-[var(--shell-accent-hover)] disabled:opacity-50"
-            >
-              验证并登录
-            </button>
-            {businessToken ? (
-              <>
                 <button
                   type="button"
                   disabled={busy}
@@ -1354,10 +1318,7 @@ export default function AccountLoginModal({
                     查看历史
                   </button>
                 ) : null}
-              </>
-            ) : null}
-            {businessToken ? (
-              !logoutChoiceOpen ? (
+              {!logoutChoiceOpen ? (
                 <button
                   type="button"
                   disabled={busy}
@@ -1366,11 +1327,10 @@ export default function AccountLoginModal({
                 >
                   退出业务登录
                 </button>
-              ) : null
-            ) : null}
+              ) : null}
           </div>
 
-          {businessToken && logoutChoiceOpen ? (
+          {logoutChoiceOpen ? (
             <div className="rounded-lg border border-[var(--shell-border-subtle)] bg-[var(--shell-elevated)] p-3">
               <p className="mb-2 text-sm text-[var(--shell-text)]">请选择退出方式：</p>
               <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
@@ -1406,7 +1366,7 @@ export default function AccountLoginModal({
             </div>
           ) : null}
 
-          {businessToken && workspaceMode !== 'team' && historyItems.length > 0 ? (
+          {workspaceMode !== 'team' && historyItems.length > 0 ? (
             <div className="rounded-lg border border-[var(--shell-border-subtle)] bg-[var(--shell-elevated)] p-3">
               <p className="mb-2 text-xs font-medium text-[var(--shell-text-muted)]">云端历史快照（最近 3 条）</p>
               <div className="space-y-2">
@@ -1429,6 +1389,147 @@ export default function AccountLoginModal({
               </div>
             </div>
           ) : null}
+              </div>
+            ))}
+
+          {settingsTab === 'team' &&
+            (!businessToken ? (
+              needLoginPanel
+            ) : (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-[var(--shell-border-subtle)] bg-[var(--shell-elevated)] p-3 space-y-2">
+                  <p className="text-xs font-medium text-[var(--shell-text-muted)]">双人协作（MVP，最多 2 人）</p>
+                  <p className="text-xs text-[var(--shell-text-muted)]">
+                    当前工作区：
+                    {workspaceMode === 'team' && activeTeamId ? (
+                      <span className="text-emerald-300"> 协作 · {activeTeamId}</span>
+                    ) : (
+                      <span> 个人云</span>
+                    )}
+                  </p>
+                  {workspaceMode === 'team' && activeTeamId && teamMemberEmails.length > 0 ? (
+                    <div className="rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] p-2">
+                      <p className="mb-1.5 text-xs font-medium text-[var(--shell-text-muted)]">成员（请区分本人与队友）</p>
+                      <ul className="space-y-1">
+                        {teamMemberEmails.map((raw, idx) => {
+                          const em = typeof raw === 'string' ? raw.trim() : '';
+                          const isMe =
+                            !!accountEmail && em.toLowerCase() === accountEmail.trim().toLowerCase();
+                          return (
+                            <li
+                              key={`${idx}-${em || String(raw)}`}
+                              className="flex items-start gap-1.5 text-xs text-[var(--shell-text-strong)]"
+                            >
+                              {isMe ? (
+                                <span
+                                  className="mt-0.5 inline-flex h-4 min-w-[1rem] shrink-0 items-center justify-center rounded bg-emerald-500/20 px-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-300"
+                                  title="当前登录账号（本人）"
+                                >
+                                  我
+                                </span>
+                              ) : (
+                                <span className="mt-0.5 shrink-0" title="队友（非本人，请谨慎修改或删除其任务）">
+                                  <ThumbsUp
+                                    className="h-3.5 w-3.5 text-amber-500 dark:text-amber-400"
+                                    strokeWidth={2.25}
+                                    aria-label="队友"
+                                  />
+                                </span>
+                              )}
+                              <span className="break-all leading-snug">{em || raw}</span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {workspaceMode === 'team' && activeTeamId && isTeamOwner ? (
+                    <div className="space-y-1 rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] p-2">
+                      <p className="text-xs font-medium text-[var(--shell-text-muted)]">队友权限（仅创建者）</p>
+                      <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--shell-text-strong)]">
+                        <input
+                          type="radio"
+                          name="team-peer-mode-settings"
+                          checked={teamPeerAccess === 'bothPush'}
+                          onChange={() => void handleSetTeamPeerAccess('bothPush')}
+                          disabled={busy}
+                        />
+                        对方可读写（双方均可推送到协作云端）
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--shell-text-strong)]">
+                        <input
+                          type="radio"
+                          name="team-peer-mode-settings"
+                          checked={teamPeerAccess === 'peerReadOnly'}
+                          onChange={() => void handleSetTeamPeerAccess('peerReadOnly')}
+                          disabled={busy}
+                        />
+                        对方只读（队友仅可拉取，不可推送）
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--shell-text-strong)]">
+                        <input
+                          type="radio"
+                          name="team-peer-mode-settings"
+                          checked={teamPeerAccess === 'peerReadAllWriteOwn'}
+                          onChange={() => void handleSetTeamPeerAccess('peerReadAllWriteOwn')}
+                          disabled={busy}
+                        />
+                        对方可读全部、仅写自己的任务与笔记
+                      </label>
+                    </div>
+                  ) : null}
+                  <label className="block text-xs font-medium text-[var(--shell-text-muted)]">
+                    协作空间 ID（加入）
+                    <input
+                      type="text"
+                      value={teamJoinId}
+                      onChange={(e) => setTeamJoinId(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-[var(--shell-border)] bg-[var(--shell-panel)] px-3 py-2 text-sm text-[var(--shell-text-strong)] outline-none focus:border-[var(--shell-accent)]"
+                      placeholder="队友发给你的 ID"
+                      disabled={busy}
+                    />
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={handleTeamCreate}
+                      className="rounded-lg border border-[var(--shell-border)] px-3 py-1.5 text-xs text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
+                    >
+                      创建协作空间
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={handleTeamJoin}
+                      className="rounded-lg border border-[var(--shell-border)] px-3 py-1.5 text-xs text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
+                    >
+                      加入并切换
+                    </button>
+                    {workspaceMode === 'team' && activeTeamId ? (
+                      <>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={handleSwitchToPersonalOnly}
+                          className="rounded-lg border border-[var(--shell-border)] px-3 py-1.5 text-xs text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
+                        >
+                          切回个人云
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={handleTeamLeave}
+                          className="rounded-lg border border-amber-700/50 px-3 py-1.5 text-xs text-amber-200 hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
+                        >
+                          退出协作
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ))}
         </div>
       </div>
     </div>
