@@ -1,11 +1,11 @@
 # Changelog
 
-## v0.3.0
+## v0.2.1
 
 - **个人云下行**：`watch` 与约 **15s** 一次云函数 **`pull` 并行**（`watch` 仅作加速）；协作工作区行为不变。顶栏提示由「轮询兜底」改为 **「定时拉取」**；`watch` 初始化失败增加 **`.catch`** 兜底。
 - **登录自动拉取**：验码成功后立即 **个人云 `pull` 合并** 并写入 **`todo-calendar-first-pull-done`**（解锁自动推 / 弹窗内定时同步）；若在 **协作工作区** 登录则 **自动 `team-pull`**；协作自动拉取失败时提示 **「登录时自动拉取失败，必须手动拉」**。
 - **退出前同步**：点「退出业务登录」先尝试 **推送**（个人 `push` / 协作 `team-push`，只读成员跳过）；成功则提示 **已同步** 后登出；失败则 **确认是否仍要退出**（取消则保留登录）。
-- **版本对齐**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`app` 包）均为 **0.3.0**；发布安装包与 Git 标签请使用 **`v0.3.0`**（见 `.cursorrules`）。
+- **版本对齐**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`app` 包）均为 **0.2.1**；发布安装包与 Git 标签请使用 **`v0.2.1`**（见 `.cursorrules`）。
 
 ## v0.2.0
 

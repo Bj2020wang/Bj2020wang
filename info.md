@@ -1,4 +1,4 @@
-Todo Calendar 工程说明补充：**应用版本见 `package.json`（当前 0.3.0：协作 + 登录拉取/退出推同步完善）**；详细以 `PROJECT_GUIDE.md` / `CHANGELOG.md` 为准。
+Todo Calendar 工程说明补充：**应用版本见 `package.json`（当前 0.2.1：协作 + 登录拉取/退出推同步完善）**；详细以 `PROJECT_GUIDE.md` / `CHANGELOG.md` 为准。
 
 ---
 
