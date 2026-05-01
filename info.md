@@ -1,4 +1,4 @@
-Todo Calendar 工程说明补充：**应用版本见 `package.json`（当前 0.2.1：协作 + 登录拉取/退出时可选清空本机日历）**；详细以 `PROJECT_GUIDE.md` / `CHANGELOG.md` 为准。
+Todo Calendar 工程说明补充：**应用版本见 `package.json`（当前 0.2.2：协作切回个人云仅合并本人数据 + 登录拉取/退出时可选清空本机日历）**；详细以 `PROJECT_GUIDE.md` / `CHANGELOG.md` 为准。
 
 ---
 

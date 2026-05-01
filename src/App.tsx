@@ -232,6 +232,59 @@ const TODO_COMPARE_FIELDS: Array<keyof TodoItem> = [
 const readEventUpdatedAt = (event: CalendarEvent): number =>
   typeof event.updatedAt === 'number' && Number.isFinite(event.updatedAt) ? event.updatedAt : 0;
 
+/** 从协作区内存中提取「本人」数据，用于切回个人云时与个人快照合并（不含队友条目）。 */
+function buildMyCollaborationSliceForPersonalMerge(
+  teamOwnerEmail: string,
+  accountEmail: string,
+  todos: TodoItem[],
+  events: CalendarEvent[],
+  notesByDate: Record<string, string>,
+  noteOwnerByDate: Record<string, string>,
+  noteMetaByDate: Record<string, number>,
+  noteTombstonesByDate: Record<string, number>
+): {
+  myTodos: TodoItem[];
+  myEvents: CalendarEvent[];
+  myNotesByDate: Record<string, string>;
+  myNoteOwnerByDate: Record<string, string>;
+  myNoteMetaByDate: Record<string, number>;
+  myNoteTombstonesByDate: Record<string, number>;
+} {
+  const ownerKey = normCollabEmail(teamOwnerEmail);
+  const me = normCollabEmail(accountEmail);
+  const todoMap = new Map(todos.map((t) => [t.id, t]));
+  const myTodos = todos.filter((t) => effectiveTodoOwnerEmail(t, ownerKey) === me);
+  const myEvents = events.filter((e) => effectiveEventOwnerEmail(e, todoMap, ownerKey) === me);
+
+  const myNotesByDate: Record<string, string> = {};
+  const myNoteOwnerByDate: Record<string, string> = {};
+  const myNoteMetaByDate: Record<string, number> = {};
+  const myNoteTombstonesByDate: Record<string, number> = {};
+
+  for (const [dateKey, ownerRaw] of Object.entries(noteOwnerByDate)) {
+    if (typeof ownerRaw !== 'string' || normCollabEmail(ownerRaw) !== me) continue;
+    myNoteOwnerByDate[dateKey] = me;
+    if (Object.prototype.hasOwnProperty.call(notesByDate, dateKey)) {
+      myNotesByDate[dateKey] = notesByDate[dateKey];
+    }
+    if (Object.prototype.hasOwnProperty.call(noteMetaByDate, dateKey)) {
+      myNoteMetaByDate[dateKey] = noteMetaByDate[dateKey];
+    }
+    if (Object.prototype.hasOwnProperty.call(noteTombstonesByDate, dateKey)) {
+      myNoteTombstonesByDate[dateKey] = noteTombstonesByDate[dateKey];
+    }
+  }
+
+  return {
+    myTodos,
+    myEvents,
+    myNotesByDate,
+    myNoteOwnerByDate,
+    myNoteMetaByDate,
+    myNoteTombstonesByDate,
+  };
+}
+
 const EVENT_COMPARE_FIELDS: Array<keyof CalendarEvent> = [
   'title',
   'color',
@@ -1362,6 +1415,32 @@ export default function App() {
     setNoteTombstonesByDate(mergedNotes.noteTombstonesByDate);
   }, [eventTombstones, noteMetaByDate, noteOwnerByDate, noteTombstonesByDate, notesByDate, todoTombstones]);
 
+  /** 切回个人云时用：以个人云快照为准覆盖本地，避免与协作区内存状态合并导致队友数据残留进 user_snapshots */
+  const applyPersonalSnapshotReplace = useCallback((snapshot: unknown) => {
+    if (!isPersistedDataLike(snapshot)) {
+      throw new Error('云端快照格式无效，无法应用到本地');
+    }
+    const nextDate = new Date(snapshot.currentDate);
+    if (Number.isNaN(nextDate.getTime())) {
+      throw new Error('云端快照中的日期无效');
+    }
+    const normalizedTodos = normalizeTodoColorsByCategory(snapshot.todos);
+    const normalizedEvents = normalizeEventColorsBySourceTodo(snapshot.events, normalizedTodos);
+    setTodos(normalizedTodos);
+    setTodoTombstones(snapshot.todoTombstones ?? {});
+    setEvents(normalizedEvents);
+    setEventTombstones(snapshot.eventTombstones ?? {});
+    setCurrentDate(nextDate);
+    setViewType(snapshot.viewType);
+    setNotesByDate(snapshot.notesByDate ?? {});
+    setNoteOwnerByDate(snapshot.noteOwnerByDate ?? {});
+    setNoteMetaByDate(snapshot.noteMetaByDate ?? {});
+    setNoteTombstonesByDate(snapshot.noteTombstonesByDate ?? {});
+    setTodoMergeHint('');
+    setEventMergeHint('');
+    setNoteMergeHint('');
+  }, []);
+
   const applyTeamCloudSnapshot = useCallback(
     (teamId: string, snapshot: unknown, version: number) => {
       updateTeamBaseVersion(teamId, version);
@@ -1413,6 +1492,15 @@ export default function App() {
 
   const switchToPersonalWorkspace = useCallback(
     async (opts?: { skipTeamFlush?: boolean }) => {
+    const wasTeam = workspaceMode === 'team';
+    const capturedTeamOwnerEmail = teamOwnerEmail;
+    const capturedTodos = todos;
+    const capturedEvents = events;
+    const capturedNotesByDate = notesByDate;
+    const capturedNoteOwnerByDate = noteOwnerByDate;
+    const capturedNoteMetaByDate = noteMetaByDate;
+    const capturedNoteTombstonesByDate = noteTombstonesByDate;
+
     if (!opts?.skipTeamFlush && workspaceMode === 'team' && businessToken && activeTeamId) {
       const canFlushTeam =
         teamPeerAccess !== 'peerReadOnly' ||
@@ -1451,7 +1539,69 @@ export default function App() {
       const res = await pullSnapshot(businessToken);
       const snap = res.data?.snapshot;
       if (snap != null && isPersistedDataLike(snap)) {
-        applyAccountSnapshot(snap);
+        const canMergeTeamMine =
+          wasTeam &&
+          !!accountEmail &&
+          !!capturedTeamOwnerEmail &&
+          normCollabEmail(capturedTeamOwnerEmail).length > 0;
+        if (canMergeTeamMine) {
+          const slice = buildMyCollaborationSliceForPersonalMerge(
+            capturedTeamOwnerEmail,
+            accountEmail,
+            capturedTodos,
+            capturedEvents,
+            capturedNotesByDate,
+            capturedNoteOwnerByDate,
+            capturedNoteMetaByDate,
+            capturedNoteTombstonesByDate
+          );
+          const mergedTodo = mergeTodoRecords(
+            snap.todos,
+            snap.todoTombstones ?? {},
+            slice.myTodos,
+            {}
+          );
+          const mergedEv = mergeEventRecords(
+            snap.events,
+            snap.eventTombstones ?? {},
+            slice.myEvents,
+            {}
+          );
+          const mergedNotes = mergeNoteRecords(
+            snap.notesByDate ?? {},
+            snap.noteOwnerByDate ?? {},
+            snap.noteMetaByDate ?? {},
+            snap.noteTombstonesByDate ?? {},
+            slice.myNotesByDate,
+            slice.myNoteOwnerByDate,
+            slice.myNoteMetaByDate,
+            slice.myNoteTombstonesByDate
+          );
+          let nextDate = new Date(snap.currentDate);
+          if (Number.isNaN(nextDate.getTime())) {
+            nextDate = new Date();
+          }
+          applyPersonalSnapshotReplace(
+            createPersistedPayload(
+              mergedTodo.todos,
+              mergedTodo.tombstones,
+              mergedEv.events,
+              mergedEv.tombstones,
+              nextDate,
+              snap.viewType,
+              mergedNotes.notesByDate,
+              mergedNotes.noteOwnerByDate,
+              mergedNotes.noteMetaByDate,
+              mergedNotes.noteTombstonesByDate
+            )
+          );
+        } else {
+          applyPersonalSnapshotReplace(snap);
+        }
+      } else {
+        applyPersonalSnapshotReplace(
+          createPersistedPayload([], {}, [], {}, new Date(), 'month', {}, {}, {}, {})
+        );
       }
       const pv = typeof res.data?.version === 'number' ? res.data.version : 0;
       updateBaseVersion(pv);
@@ -1459,18 +1609,23 @@ export default function App() {
   },
     [
     activeTeamId,
-    applyAccountSnapshot,
+    applyPersonalSnapshotReplace,
+    accountEmail,
     businessToken,
     deviceId,
-    getAccountSnapshot,
+    events,
+    getTeamPushSnapshot,
+    noteMetaByDate,
+    noteOwnerByDate,
+    noteTombstonesByDate,
+    notesByDate,
     pullSnapshot,
+    todos,
     updateBaseVersion,
     updateTeamBaseVersion,
     workspaceMode,
     teamPeerAccess,
     teamOwnerEmail,
-    accountEmail,
-    getTeamPushSnapshot,
   ]
   );
 

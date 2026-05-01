@@ -39,6 +39,9 @@ export function teamFirstPullDoneKey(teamId: string): string {
   return `todo-calendar-team-first-pull-${teamId}`;
 }
 
+/** 协作工作区：与个人云同参数的空闲自动双向（拉/推检查）开关 */
+export const TEAM_AUTO_BIDIR_ENABLED_KEY = 'todo-calendar-team-auto-bidir-enabled';
+
 export function getAccountHttpOrigin(): string {
   const fromEnv = import.meta.env.VITE_ACCOUNT_HTTP_BASE?.trim();
   if (fromEnv) return fromEnv.replace(/\/$/, '');

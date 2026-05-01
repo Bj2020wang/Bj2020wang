@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.2
+
+- **协作切回个人云**：从协作工作区切到个人云时，先拉取个人快照，再仅合并协作内存中**归属当前用户**的待办、日程与笔记（`effectiveTodoOwnerEmail` / `effectiveEventOwnerEmail`；笔记须 `noteOwnerByDate` 明确为本人，无归属键的日期不合并，避免历史脏数据）。**不合并**协作侧的待办/日程删除墓碑，优先保护个人云已有数据（保守策略）。实现见 `App.tsx` 的 `buildMyCollaborationSliceForPersonalMerge` 与 `switchToPersonalWorkspace`。
+- **版本对齐**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`app` 包）均为 **0.2.2**；发布安装包与 Git 标签请使用 **`v0.2.2`**（见 `.cursorrules`）。
+
 ## v0.2.1
 
 - **个人云下行**：`watch` 与约 **15s** 一次云函数 **`pull` 并行**（`watch` 仅作加速）；协作工作区行为不变。顶栏提示由「轮询兜底」改为 **「定时拉取」**；`watch` 初始化失败增加 **`.catch`** 兜底。

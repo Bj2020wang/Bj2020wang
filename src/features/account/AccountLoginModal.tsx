@@ -5,7 +5,7 @@ import * as authApi from './authApi';
 import { AccountSyncConflictError } from './authApi';
 import type { SnapshotHistoryItem, TeamPeerAccess } from './authApi';
 import { normalizeTeamPeerAccess } from '@/lib/teamCollab';
-import { teamFirstPullDoneKey } from './config';
+import { TEAM_AUTO_BIDIR_ENABLED_KEY, teamFirstPullDoneKey } from './config';
 import { watchUserSnapshotByEmail } from './userSnapshotDb';
 import type { UserSnapshotDocPayload } from './userSnapshotDb';
 import { syncDebugInfo, syncDebugWarn } from './syncDebug';
@@ -105,6 +105,10 @@ export default function AccountLoginModal({
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(AUTO_PUSH_ENABLED_KEY) === '1';
   });
+  const [teamAutoBidirEnabled, setTeamAutoBidirEnabled] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(TEAM_AUTO_BIDIR_ENABLED_KEY) === '1';
+  });
   const [hasPulledOnce, setHasPulledOnce] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(FIRST_PULL_DONE_KEY) === '1';
@@ -141,6 +145,7 @@ export default function AccountLoginModal({
   const lastReportedRuntimeRef = useRef<string>('');
   const runtimePhaseRef = useRef<'未登录' | '同步中' | '空闲'>('未登录');
   const baseVersionRef = useRef(baseVersion);
+  const teamBaseVersionRef = useRef(teamBaseVersion);
   const pullSnapshotRef = useRef(pullSnapshot);
   pullSnapshotRef.current = pullSnapshot;
 
@@ -159,6 +164,10 @@ export default function AccountLoginModal({
   useEffect(() => {
     baseVersionRef.current = baseVersion;
   }, [baseVersion]);
+
+  useEffect(() => {
+    teamBaseVersionRef.current = teamBaseVersion;
+  }, [teamBaseVersion]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -464,6 +473,73 @@ export default function AccountLoginModal({
     return { localUpdatedAt, cloudUpdatedAt, localHasChanges, cloudHasNewerVersion, cloudVersion };
   };
 
+  const applyTeamCloudPullMerge = useCallback(
+    (teamId: string, res: Awaited<ReturnType<typeof authApi.teamPull>>) => {
+      onTeamWorkspaceMeta?.({
+        peerAccess: normalizeTeamPeerAccess(res.data?.peerAccess, res.data?.peerReadOnly),
+        ownerEmail: typeof res.data?.ownerEmail === 'string' ? res.data.ownerEmail : null,
+      });
+      const ver = typeof res.data?.version === 'number' ? res.data.version : 0;
+      onTeamCloudPulled?.(teamId, res.data?.snapshot ?? null, ver);
+      const pulledAt = Date.now();
+      setLastPullAt(pulledAt);
+      window.localStorage.setItem(ACCOUNT_LAST_PULL_AT_KEY, String(pulledAt));
+    },
+    [onTeamCloudPulled, onTeamWorkspaceMeta]
+  );
+
+  const checkCollaborationSyncStatus = useCallback(
+    async (
+      token: string,
+      teamId: string
+    ): Promise<{
+      localUpdatedAt: number | null;
+      cloudUpdatedAt: number | null;
+      localHasChanges: boolean;
+      cloudHasNewerVersion: boolean;
+      cloudVersion: number;
+      pullRes: Awaited<ReturnType<typeof authApi.teamPull>>;
+    }> => {
+      const localSnapshot = onPushSnapshot();
+      const localUpdatedAt = readUpdatedAt(localSnapshot);
+      const pullRes = await authApi.teamPull(token, teamId);
+      const cloudSnapshot = pullRes.data?.snapshot;
+      const cloudUpdatedAt = typeof pullRes.data?.updatedAt === 'number' ? pullRes.data.updatedAt : null;
+      const cloudVersion = typeof pullRes.data?.version === 'number' ? pullRes.data.version : 0;
+      const cloudHasNewerVersion = cloudVersion > teamBaseVersionRef.current;
+      const localComparable = toComparableString(localSnapshot);
+      const cloudComparable = toComparableString(cloudSnapshot);
+      const snapshotDifferent =
+        localComparable !== '' && cloudComparable !== '' && localComparable !== cloudComparable;
+      const localHasChanges =
+        snapshotDifferent ||
+        (!!localUpdatedAt && (!cloudUpdatedAt || localUpdatedAt > cloudUpdatedAt));
+      setHasPendingSync(localHasChanges && !cloudHasNewerVersion);
+
+      if (!localUpdatedAt && !cloudUpdatedAt) {
+        setSyncStatus('协作：暂无可比较的同步时间');
+      } else if (cloudHasNewerVersion) {
+        setSyncStatus('协作：检测到云端有更新');
+      } else if (cloudUpdatedAt && (!localUpdatedAt || cloudUpdatedAt > localUpdatedAt)) {
+        setSyncStatus('协作：检测到云端有更新');
+      } else if (localHasChanges) {
+        setSyncStatus('协作：检测到本地有未推送更新');
+      } else {
+        setSyncStatus('协作：本地与云端已同步');
+      }
+
+      return {
+        localUpdatedAt,
+        cloudUpdatedAt,
+        localHasChanges,
+        cloudHasNewerVersion,
+        cloudVersion,
+        pullRes,
+      };
+    },
+    [onPushSnapshot]
+  );
+
   useEffect(() => {
     if (!businessToken) {
       setSyncStatus('');
@@ -568,13 +644,175 @@ export default function AccountLoginModal({
     };
   }, [activeTeamId, autoPushEnabled, baseVersion, businessToken, busy, hasPulledOnce, reportRuntime, workspaceMode]);
 
+  /** 协作云：与个人云同参数的空闲自动双向（每 60s 检查；空闲 30s + 最短间隔 60s + 冷却 15s 才执行） */
+  useEffect(() => {
+    if (!businessToken) return;
+    if (workspaceMode !== 'team' || !activeTeamId) return;
+
+    let cancelled = false;
+    const tick = async () => {
+      if (!teamAutoBidirEnabled) {
+        reportRuntime('空闲');
+        return;
+      }
+      if (
+        typeof window !== 'undefined' &&
+        window.localStorage.getItem(teamFirstPullDoneKey(activeTeamId)) !== '1'
+      ) {
+        reportRuntime('空闲');
+        return;
+      }
+      if (busy) {
+        reportRuntime('空闲');
+        return;
+      }
+
+      reportRuntime('同步中');
+      try {
+        const summary = await checkCollaborationSyncStatus(businessToken, activeTeamId);
+        if (cancelled) return;
+
+        const now = Date.now();
+        const isIdle = now - lastActivityAtRef.current >= AUTO_PUSH_IDLE_MS;
+        const intervalOk = now - lastAutoPushAtRef.current >= AUTO_PUSH_INTERVAL_MS;
+        const cooldownOk = now - lastSyncActionAtRef.current >= AUTO_SYNC_COOLDOWN_MS;
+        if (!isIdle || !intervalOk || !cooldownOk) {
+          reportRuntime('空闲');
+          return;
+        }
+
+        const tid = activeTeamId;
+        const pullVer =
+          typeof summary.pullRes.data?.version === 'number' ? summary.pullRes.data.version : 0;
+
+        if (summary.cloudHasNewerVersion && summary.localHasChanges) {
+          applyTeamCloudPullMerge(tid, summary.pullRes);
+          const pulledAt = Date.now();
+          lastSyncActionAtRef.current = pulledAt;
+          setHasPendingSync(false);
+
+          if (teamPushForbidden) {
+            setSyncStatus('协作：已自动拉取合并（只读成员无法推送本地改动）');
+            reportRuntime('空闲');
+            return;
+          }
+
+          const mergedSnapshot = onPushSnapshot();
+          try {
+            const pushRes = await authApi.teamPush(businessToken, tid, mergedSnapshot, {
+              baseVersion: pullVer,
+              deviceId,
+              platform: 'web',
+            });
+            const pv = pushRes.data?.version;
+            if (typeof pv === 'number') onTeamPushedVersion?.(tid, pv);
+            const pushedAt = Date.now();
+            lastAutoPushAtRef.current = pushedAt;
+            lastSyncActionAtRef.current = pushedAt;
+            setLastAutoPushAt(pushedAt);
+            window.localStorage.setItem(AUTO_PUSH_LAST_AT_KEY, String(pushedAt));
+            setLastPushAt(pushedAt);
+            window.localStorage.setItem(ACCOUNT_LAST_PUSH_AT_KEY, String(pushedAt));
+            setSyncStatus('协作：已自动执行双向同步（先拉后推）');
+          } catch (e) {
+            if (e instanceof AccountSyncConflictError) {
+              setSyncStatus('协作自动同步遇到版本冲突，请手动拉取或推送');
+            } else {
+              throw e;
+            }
+          }
+          reportRuntime('空闲');
+          return;
+        }
+
+        if (summary.cloudHasNewerVersion) {
+          applyTeamCloudPullMerge(tid, summary.pullRes);
+          const pulledAt = Date.now();
+          lastSyncActionAtRef.current = pulledAt;
+          setHasPendingSync(false);
+          setSyncStatus('协作：已自动拉取云端并合并');
+          reportRuntime('空闲');
+          return;
+        }
+
+        if (summary.localHasChanges && !teamPushForbidden) {
+          const localSnapshot = onPushSnapshot();
+          try {
+            const pushRes = await authApi.teamPush(businessToken, tid, localSnapshot, {
+              baseVersion: teamBaseVersionRef.current,
+              deviceId,
+              platform: 'web',
+            });
+            const pv = pushRes.data?.version;
+            if (typeof pv === 'number') onTeamPushedVersion?.(tid, pv);
+            const pushedAt = Date.now();
+            lastAutoPushAtRef.current = pushedAt;
+            lastSyncActionAtRef.current = pushedAt;
+            setLastAutoPushAt(pushedAt);
+            window.localStorage.setItem(AUTO_PUSH_LAST_AT_KEY, String(pushedAt));
+            setLastPushAt(pushedAt);
+            window.localStorage.setItem(ACCOUNT_LAST_PUSH_AT_KEY, String(pushedAt));
+            setHasPendingSync(false);
+            setSyncStatus('协作：空闲自动推送完成');
+          } catch (e) {
+            if (e instanceof AccountSyncConflictError) {
+              setSyncStatus('协作自动同步遇到版本冲突，请手动拉取或推送');
+            } else {
+              throw e;
+            }
+          }
+        }
+        reportRuntime('空闲');
+      } catch (e) {
+        if (e instanceof AccountSyncConflictError) {
+          if (!cancelled) setSyncStatus('协作自动同步遇到版本冲突，请手动拉取或推送');
+          reportRuntime('空闲');
+          return;
+        }
+        if (!cancelled) {
+          setSyncStatus('');
+        }
+        reportRuntime('空闲');
+      }
+    };
+
+    void tick();
+    const timer = window.setInterval(() => {
+      void tick();
+    }, 60_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    activeTeamId,
+    applyTeamCloudPullMerge,
+    businessToken,
+    busy,
+    checkCollaborationSyncStatus,
+    deviceId,
+    onTeamPushedVersion,
+    onPushSnapshot,
+    reportRuntime,
+    teamAutoBidirEnabled,
+    teamPushForbidden,
+    workspaceMode,
+  ]);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(AUTO_PUSH_ENABLED_KEY, autoPushEnabled ? '1' : '0');
   }, [autoPushEnabled]);
 
   useEffect(() => {
-    if (!businessToken || !autoPushEnabled) return;
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(TEAM_AUTO_BIDIR_ENABLED_KEY, teamAutoBidirEnabled ? '1' : '0');
+  }, [teamAutoBidirEnabled]);
+
+  useEffect(() => {
+    const trackTeamIdle = workspaceMode === 'team' && !!activeTeamId && teamAutoBidirEnabled;
+    if (!businessToken || (!autoPushEnabled && !trackTeamIdle)) return;
     const markActive = () => {
       lastActivityAtRef.current = Date.now();
     };
@@ -583,7 +821,7 @@ export default function AccountLoginModal({
     return () => {
       events.forEach((name) => window.removeEventListener(name, markActive));
     };
-  }, [autoPushEnabled, businessToken]);
+  }, [activeTeamId, autoPushEnabled, businessToken, teamAutoBidirEnabled, workspaceMode]);
 
   useEffect(() => {
     if (!businessToken || !hasPendingSync) return;
@@ -838,15 +1076,7 @@ export default function AccountLoginModal({
           setHint('已取消拉取协作云端');
           return;
         }
-        const ver = typeof res.data?.version === 'number' ? res.data.version : 0;
-        onTeamWorkspaceMeta?.({
-          peerAccess: normalizeTeamPeerAccess(res.data?.peerAccess, res.data?.peerReadOnly),
-          ownerEmail: typeof res.data?.ownerEmail === 'string' ? res.data.ownerEmail : null,
-        });
-        onTeamCloudPulled?.(activeTeamId, res.data?.snapshot ?? null, ver);
-        const pulledAt = Date.now();
-        setLastPullAt(pulledAt);
-        window.localStorage.setItem(ACCOUNT_LAST_PULL_AT_KEY, String(pulledAt));
+        applyTeamCloudPullMerge(activeTeamId, res);
         setHint('已从协作云端拉取并合并到本地');
         return;
       }
@@ -1232,43 +1462,58 @@ export default function AccountLoginModal({
               needLoginPanel
             ) : (
               <div className="space-y-3">
-            <label className="flex items-center gap-2 text-xs text-[var(--shell-text-muted)]">
-              <input
-                type="checkbox"
-                checked={autoPushEnabled}
-                onChange={(e) => {
-                  if (!e.target.checked) {
-                    setAutoPushEnabled(false);
-                    return;
-                  }
-                  if (workspaceMode === 'team' && activeTeamId) {
-                    if (teamPushForbidden) {
-                      window.alert('当前为「对方只读」，你不能向协作云端自动推送。');
+            {workspaceMode === 'team' && activeTeamId ? (
+              <label className="flex items-center gap-2 text-xs text-[var(--shell-text-muted)]">
+                <input
+                  type="checkbox"
+                  checked={teamAutoBidirEnabled}
+                  onChange={(e) => {
+                    if (!e.target.checked) {
+                      setTeamAutoBidirEnabled(false);
+                      return;
+                    }
+                    if (
+                      typeof window !== 'undefined' &&
+                      window.localStorage.getItem(teamFirstPullDoneKey(activeTeamId)) !== '1'
+                    ) {
+                      window.alert('请先在协作空间执行一次「拉取协作云端」，再开启协作空闲自动双向。');
+                      setTeamAutoBidirEnabled(false);
+                      return;
+                    }
+                    setTeamAutoBidirEnabled(true);
+                  }}
+                  disabled={busy}
+                />
+                开启协作空闲自动双向（与个人云一致：空闲约 30 秒，每 60 秒检查；可静默先拉后推）
+              </label>
+            ) : (
+              <label className="flex items-center gap-2 text-xs text-[var(--shell-text-muted)]">
+                <input
+                  type="checkbox"
+                  checked={autoPushEnabled}
+                  onChange={(e) => {
+                    if (!e.target.checked) {
                       setAutoPushEnabled(false);
                       return;
                     }
-                    if (typeof window !== 'undefined' && window.localStorage.getItem(teamFirstPullDoneKey(activeTeamId)) !== '1') {
-                      window.alert('请先在协作空间执行一次「拉取协作云端」，再开启自动推送。');
+                    if (!hasPulledOnce) {
+                      window.alert('首次登录请先执行一次“拉取云端”，再开启自动推送。');
                       setAutoPushEnabled(false);
                       return;
                     }
-                  } else if (!hasPulledOnce) {
-                    window.alert('首次登录请先执行一次“拉取云端”，再开启自动推送。');
-                    setAutoPushEnabled(false);
-                    return;
-                  }
-                  setAutoPushEnabled(true);
-                }}
-                disabled={busy}
-              />
-              开启空闲自动推送（空闲 30 秒，最短间隔 60 秒）
-            </label>
+                    setAutoPushEnabled(true);
+                  }}
+                  disabled={busy}
+                />
+                开启空闲自动推送（空闲 30 秒，最短间隔 60 秒）
+              </label>
+            )}
 
           {!hasPulledOnce && workspaceMode !== 'team' ? (
             <p className="text-xs text-amber-300">首次登录请先拉取云端，避免自动推送覆盖云端数据。</p>
           ) : null}
           {workspaceMode === 'team' && activeTeamId && typeof window !== 'undefined' && window.localStorage.getItem(teamFirstPullDoneKey(activeTeamId)) !== '1' ? (
-            <p className="text-xs text-amber-300">协作空间请先「拉取协作云端」一次，再开启自动推送。</p>
+            <p className="text-xs text-amber-300">协作空间请先「拉取协作云端」一次，再开启协作空闲自动双向。</p>
           ) : null}
           {workspaceMode === 'team' && activeTeamId && teamPushForbidden ? (
             <p className="text-xs text-amber-300">当前为「对方只读」：你可拉取协作内容；推送到协作云端仅创建者可用。</p>
@@ -1282,7 +1527,7 @@ export default function AccountLoginModal({
             </p>
           ) : null}
 
-          {autoPushEnabled ? (
+          {(autoPushEnabled || (workspaceMode === 'team' && !!activeTeamId && teamAutoBidirEnabled)) && lastAutoPushAt ? (
             <p className="text-xs text-[var(--shell-text-muted)]">
               上次自动推送时间：{formatTime(lastAutoPushAt)}
             </p>

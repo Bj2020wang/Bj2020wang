@@ -1,8 +1,13 @@
 # Todo Calendar（待办日历）
 
-**当前版本：0.2.1**（与 `package.json`、`src-tauri/tauri.conf.json` 一致）
+**当前版本：0.2.2**（与 `package.json`、`src-tauri/tauri.conf.json` 一致）
 
 基于 **React + TypeScript + Vite** 的日历与待办应用，可选 **Tauri** 打包 Windows 安装包；云端使用 **腾讯云 CloudBase**（云函数 HTTP `newworld` + 文档数据库）。
+
+## 0.2.2 亮点（协作切回个人云）
+
+- **数据边界**：切回个人云时只合并**本人**在协作区的改动，队友数据不会进入个人云 `user_snapshots`。
+- **笔记与删除策略**：笔记仅当 `noteOwnerByDate` 明确为自己时才合并；待办/日程不合并协作侧删除墓碑（保守，减少误删个人侧数据）。
 
 ## 0.2.1 亮点（同步体验）
 
