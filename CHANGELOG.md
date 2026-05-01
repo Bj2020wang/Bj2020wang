@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.0
+
+- **双人协作（重大功能）**：在账号弹窗「双人协作」中创建/加入协作空间（`team_snapshots`，MVP 最多 2 人），与个人云 `user_snapshots` **数据隔离**；工作区可在「个人云」与「协作云」之间切换（`App.tsx` + `config.ts` 本地键）。
+- **云函数 `newworld`**：新增 `team-create`、`team-join`、`team-leave`、`team-get`、`team-pull`、`team-push`、`team-set-peer-read-only`；协作快照使用与个人云相同的 `version` / `baseVersion` 409 冲突语义；字段 **`peerReadOnly`** 为 true 时仅 **`ownerEmail`（创建者）** 可推送，队友仅可拉取。
+- **前端**：`authApi.ts` 协作接口；`AccountLoginModal.tsx` 协作 UI、协作模式下拉推与权限选项；协作模式下关闭 `user_snapshots` 的 watch/空闲双向同步；`App.tsx` 协作防抖自动推送（需协作侧首次拉取标记 `team-first-pull-*`）。
+- **云数据库写入**：当文档中 **`snapshot` 为 `null`** 时，`update` 合并会触发 Mongo 报错 `Cannot create field ... in element {snapshot: null}`，已在 **`push` / `team-push`** 中对 `snapshot` 使用 **`db.command.set`（`_.set`）** 整体替换；并统一经 **`snapshotForStore`** 规范化。
+- **运维与排错**：全局 `catch` 对集合缺失返回更可读提示；`handlePull` / `ensureSnapshotDbAuthUid` 对集合不存在做降级；便于云函数日志对照。
+- **版本对齐**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`app` 包）均为 **0.2.0**；发布安装包与 Git 标签请使用 **`v0.2.0`**（见 `.cursorrules`）。
+
 ## v0.1.6
 
 - **版本对齐**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 与 Git 标签 **`v0.1.6`** 一致；Windows 安装包文件名为 `Todo Calendar_0.1.6_x64-setup.exe`，归档目录 `release/v0.1.6/`。

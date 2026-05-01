@@ -7,7 +7,14 @@ import DayView from '@/components/DayView';
 import GlobalSearchPanel from '@/features/search/GlobalSearchPanel';
 import AccountLoginModal from '@/features/account/AccountLoginModal';
 import { useSharedAccountAuth } from '@/features/account/AccountAuthContext';
+import * as authApi from '@/features/account/authApi';
 import { AccountSyncConflictError } from '@/features/account/authApi';
+import {
+  ACTIVE_TEAM_ID_KEY,
+  WORKSPACE_MODE_KEY,
+  teamBaseVersionStorageKey,
+  teamFirstPullDoneKey,
+} from '@/features/account/config';
 import type { ViewType, CalendarEvent, TodoItem, TodoCategory, TodoScopeType } from '@/types';
 import { getMonthDays, getWeekDays } from '@/lib/calendar-utils';
 import { useEventReminders } from '@/features/notifications/useEventReminders';
@@ -38,6 +45,24 @@ const STORAGE_KEY = 'todo-calendar-local-v1';
 /** 与 AccountLoginModal 一致：完成过至少一次「拉取云端」后才自动推送，避免覆盖云端 */
 const FIRST_PULL_DONE_KEY = 'todo-calendar-first-pull-done';
 const AUTO_PUSH_DEBOUNCE_MS = 1200;
+
+function readWorkspaceMode(): 'personal' | 'team' {
+  if (typeof window === 'undefined') return 'personal';
+  return window.localStorage.getItem(WORKSPACE_MODE_KEY) === 'team' ? 'team' : 'personal';
+}
+
+function readActiveTeamId(): string | null {
+  if (typeof window === 'undefined') return null;
+  const t = window.localStorage.getItem(ACTIVE_TEAM_ID_KEY)?.trim();
+  return t || null;
+}
+
+function readTeamBaseVersion(teamId: string | null): number {
+  if (!teamId || typeof window === 'undefined') return 0;
+  const raw = window.localStorage.getItem(teamBaseVersionStorageKey(teamId));
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
 
 interface PersistedData {
   todos: TodoItem[];
@@ -380,8 +405,72 @@ const mergeNoteRecords = (
 };
 
 export default function App() {
-  const { businessToken, pushSnapshot } = useSharedAccountAuth();
+  const {
+    businessToken,
+    pushSnapshot,
+    pullSnapshot,
+    updateBaseVersion,
+    deviceId,
+    accountEmail,
+  } = useSharedAccountAuth();
   const autoPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [workspaceMode, setWorkspaceMode] = useState<'personal' | 'team'>(() => readWorkspaceMode());
+  const [activeTeamId, setActiveTeamId] = useState<string | null>(() => readActiveTeamId());
+  const [teamBaseVersion, setTeamBaseVersion] = useState<number>(() => readTeamBaseVersion(readActiveTeamId()));
+  /** true：除创建者外仅可拉取，不可推送 */
+  const [teamPeerReadOnly, setTeamPeerReadOnly] = useState(false);
+  const [teamOwnerEmail, setTeamOwnerEmail] = useState<string | null>(null);
+  const teamBaseVersionRef = useRef(teamBaseVersion);
+  useEffect(() => {
+    teamBaseVersionRef.current = teamBaseVersion;
+  }, [teamBaseVersion]);
+
+  useEffect(() => {
+    if (workspaceMode === 'team' && !activeTeamId) {
+      setWorkspaceMode('personal');
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(WORKSPACE_MODE_KEY, 'personal');
+        window.localStorage.removeItem(ACTIVE_TEAM_ID_KEY);
+      }
+    }
+  }, [workspaceMode, activeTeamId]);
+
+  useEffect(() => {
+    if (activeTeamId) {
+      setTeamBaseVersion(readTeamBaseVersion(activeTeamId));
+    } else {
+      setTeamBaseVersion(0);
+    }
+  }, [activeTeamId]);
+
+  useEffect(() => {
+    if (workspaceMode !== 'team' || !activeTeamId) {
+      setTeamPeerReadOnly(false);
+      setTeamOwnerEmail(null);
+    }
+  }, [workspaceMode, activeTeamId]);
+
+  useEffect(() => {
+    if (!businessToken || workspaceMode !== 'team' || !activeTeamId) return;
+    let cancelled = false;
+    void authApi.teamGet(businessToken, activeTeamId).then((res) => {
+      if (cancelled) return;
+      setTeamPeerReadOnly(res.data?.peerReadOnly === true);
+      setTeamOwnerEmail(
+        typeof res.data?.ownerEmail === 'string' ? res.data.ownerEmail.trim().toLowerCase() : null
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [businessToken, workspaceMode, activeTeamId]);
+
+  const updateTeamBaseVersion = useCallback((teamId: string, v: number) => {
+    setTeamBaseVersion(v);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(teamBaseVersionStorageKey(teamId), String(v));
+    }
+  }, []);
   const [persisted] = useState<PersistedData | null>(() => loadPersistedData());
   const initialTodos = normalizeTodoColorsByCategory(persisted?.todos ?? defaultTodos);
   const initialEvents = normalizeEventColorsBySourceTodo(persisted?.events ?? defaultEvents, initialTodos);
@@ -437,7 +526,7 @@ export default function App() {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   }, [todos, todoTombstones, events, eventTombstones, currentDate, viewType, notesByDate, noteMetaByDate, noteTombstonesByDate]);
 
-  /** 已登录且完成过首次拉取后：本地数据变更则防抖推送到云端（与手动「推送云端」同接口） */
+  /** 已登录且完成过首次拉取后：本地数据变更则防抖推送到云端（个人 → user_snapshots；协作 → team_snapshots） */
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!businessToken) {
@@ -447,7 +536,20 @@ export default function App() {
       }
       return;
     }
-    if (window.localStorage.getItem(FIRST_PULL_DONE_KEY) !== '1') return;
+    const inTeam = workspaceMode === 'team' && activeTeamId;
+    if (inTeam) {
+      if (window.localStorage.getItem(teamFirstPullDoneKey(activeTeamId)) !== '1') return;
+      if (
+        teamPeerReadOnly &&
+        accountEmail &&
+        teamOwnerEmail &&
+        accountEmail.trim().toLowerCase() !== teamOwnerEmail.trim().toLowerCase()
+      ) {
+        return;
+      }
+    } else {
+      if (window.localStorage.getItem(FIRST_PULL_DONE_KEY) !== '1') return;
+    }
 
     if (autoPushTimerRef.current) clearTimeout(autoPushTimerRef.current);
     autoPushTimerRef.current = setTimeout(() => {
@@ -463,13 +565,33 @@ export default function App() {
         noteMetaByDate,
         noteTombstonesByDate
       );
-      void pushSnapshot(businessToken, snap).catch((e) => {
-        if (e instanceof AccountSyncConflictError) {
-          console.warn('[auto-push] 云端版本已变，请先拉取或稍后重试', e);
-          return;
-        }
-        console.warn('[auto-push] 推送失败', e);
-      });
+      if (inTeam && activeTeamId) {
+        void authApi
+          .teamPush(businessToken, activeTeamId, snap, {
+            baseVersion: teamBaseVersionRef.current,
+            deviceId,
+            platform: 'web',
+          })
+          .then((res) => {
+            const v = res.data?.version;
+            if (typeof v === 'number') updateTeamBaseVersion(activeTeamId, v);
+          })
+          .catch((e) => {
+            if (e instanceof AccountSyncConflictError) {
+              console.warn('[auto-push team] 云端版本已变，请先拉取或稍后重试', e);
+              return;
+            }
+            console.warn('[auto-push team] 推送失败', e);
+          });
+      } else {
+        void pushSnapshot(businessToken, snap).catch((e) => {
+          if (e instanceof AccountSyncConflictError) {
+            console.warn('[auto-push] 云端版本已变，请先拉取或稍后重试', e);
+            return;
+          }
+          console.warn('[auto-push] 推送失败', e);
+        });
+      }
     }, AUTO_PUSH_DEBOUNCE_MS);
 
     return () => {
@@ -490,6 +612,13 @@ export default function App() {
     noteTombstonesByDate,
     businessToken,
     pushSnapshot,
+    workspaceMode,
+    activeTeamId,
+    deviceId,
+    updateTeamBaseVersion,
+    teamPeerReadOnly,
+    teamOwnerEmail,
+    accountEmail,
   ]);
 
   // Navigation: prev/next based on current view
@@ -1015,6 +1144,122 @@ export default function App() {
     setNoteTombstonesByDate(mergedNotes.noteTombstonesByDate);
   }, [eventTombstones, noteMetaByDate, noteTombstonesByDate, notesByDate, todoTombstones]);
 
+  const applyTeamCloudSnapshot = useCallback(
+    (teamId: string, snapshot: unknown, version: number) => {
+      updateTeamBaseVersion(teamId, version);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(teamFirstPullDoneKey(teamId), '1');
+      }
+      if (snapshot != null && isPersistedDataLike(snapshot)) {
+        applyAccountSnapshot(snapshot);
+      }
+    },
+    [applyAccountSnapshot, updateTeamBaseVersion]
+  );
+
+  const switchToTeamWorkspace = useCallback(
+    async (teamId: string) => {
+      if (!businessToken) throw new Error('请先登录');
+      const tid = teamId.trim();
+      if (!tid) throw new Error('teamId 无效');
+      try {
+        await pushSnapshot(businessToken, getAccountSnapshot());
+      } catch (e) {
+        if (!(e instanceof AccountSyncConflictError)) {
+          console.warn('[workspace] 切到协作前个人云推送失败', e);
+        }
+      }
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(WORKSPACE_MODE_KEY, 'team');
+        window.localStorage.setItem(ACTIVE_TEAM_ID_KEY, tid);
+      }
+      setWorkspaceMode('team');
+      setActiveTeamId(tid);
+      const res = await authApi.teamPull(businessToken, tid);
+      const ver = typeof res.data?.version === 'number' ? res.data.version : 0;
+      setTeamPeerReadOnly(res.data?.peerReadOnly === true);
+      setTeamOwnerEmail(
+        typeof res.data?.ownerEmail === 'string' ? res.data.ownerEmail.trim().toLowerCase() : null
+      );
+      applyTeamCloudSnapshot(tid, res.data?.snapshot ?? null, ver);
+    },
+    [applyTeamCloudSnapshot, businessToken, getAccountSnapshot, pushSnapshot]
+  );
+
+  const switchToPersonalWorkspace = useCallback(
+    async (opts?: { skipTeamFlush?: boolean }) => {
+    if (!opts?.skipTeamFlush && workspaceMode === 'team' && businessToken && activeTeamId) {
+      const canFlushTeam =
+        !teamPeerReadOnly ||
+        (accountEmail &&
+          teamOwnerEmail &&
+          accountEmail.trim().toLowerCase() === teamOwnerEmail.trim().toLowerCase());
+      if (canFlushTeam) {
+        try {
+          const resPush = await authApi.teamPush(businessToken, activeTeamId, getAccountSnapshot(), {
+            baseVersion: teamBaseVersionRef.current,
+            deviceId,
+            platform: 'web',
+          });
+          const v = resPush.data?.version;
+          if (typeof v === 'number') updateTeamBaseVersion(activeTeamId, v);
+        } catch (e) {
+          if (e instanceof AccountSyncConflictError) {
+            const ok = window.confirm(
+              '协作空间云端版本已变，若切回个人，未与队友对齐的本地改动可能丢失。确定仍切回个人空间吗？'
+            );
+            if (!ok) return;
+          } else {
+            throw e;
+          }
+        }
+      }
+    }
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(WORKSPACE_MODE_KEY, 'personal');
+      window.localStorage.removeItem(ACTIVE_TEAM_ID_KEY);
+    }
+    setWorkspaceMode('personal');
+    setActiveTeamId(null);
+    setTeamBaseVersion(0);
+    if (businessToken) {
+      const res = await pullSnapshot(businessToken);
+      const snap = res.data?.snapshot;
+      if (snap != null && isPersistedDataLike(snap)) {
+        applyAccountSnapshot(snap);
+      }
+      const pv = typeof res.data?.version === 'number' ? res.data.version : 0;
+      updateBaseVersion(pv);
+    }
+  },
+    [
+    activeTeamId,
+    applyAccountSnapshot,
+    businessToken,
+    deviceId,
+    getAccountSnapshot,
+    pullSnapshot,
+    updateBaseVersion,
+    updateTeamBaseVersion,
+    workspaceMode,
+    teamPeerReadOnly,
+    teamOwnerEmail,
+    accountEmail,
+  ]
+  );
+
+  const syncTeamWorkspaceMeta = useCallback((meta: { peerReadOnly: boolean; ownerEmail: string | null }) => {
+    setTeamPeerReadOnly(meta.peerReadOnly);
+    setTeamOwnerEmail(meta.ownerEmail ? meta.ownerEmail.trim().toLowerCase() : null);
+  }, []);
+
+  const onTeamPushedVersion = useCallback(
+    (teamId: string, v: number) => {
+      updateTeamBaseVersion(teamId, v);
+    },
+    [updateTeamBaseVersion]
+  );
+
   const { theme, toggleTheme } = useAppTheme();
 
   return (
@@ -1253,6 +1498,16 @@ export default function App() {
         onPullSnapshot={applyAccountSnapshot}
         onPushSnapshot={getAccountSnapshot}
         onRuntimeStatusChange={setAccountSyncRuntime}
+        workspaceMode={workspaceMode}
+        activeTeamId={activeTeamId}
+        teamBaseVersion={teamBaseVersion}
+        onSwitchToTeamWorkspace={switchToTeamWorkspace}
+        onSwitchToPersonalWorkspace={switchToPersonalWorkspace}
+        onTeamCloudPulled={applyTeamCloudSnapshot}
+        onTeamPushedVersion={onTeamPushedVersion}
+        teamPeerReadOnly={teamPeerReadOnly}
+        teamOwnerEmail={teamOwnerEmail}
+        onTeamWorkspaceMeta={syncTeamWorkspaceMeta}
       />
     </div>
   );

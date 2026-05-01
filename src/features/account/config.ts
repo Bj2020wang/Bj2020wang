@@ -26,6 +26,19 @@ export const ACCOUNT_VERIFICATION_EMAIL_KEY = 'todo-calendar-account-verificatio
 export const ACCOUNT_BASE_VERSION_KEY = 'todo-calendar-account-base-version';
 export const ACCOUNT_DEVICE_ID_KEY = 'todo-calendar-account-device-id';
 
+/** 工作区：个人云同步 vs 双人协作空间 */
+export const WORKSPACE_MODE_KEY = 'todo-calendar-workspace-mode';
+export const ACTIVE_TEAM_ID_KEY = 'todo-calendar-active-team-id';
+
+export function teamBaseVersionStorageKey(teamId: string): string {
+  return `todo-calendar-team-base-${teamId}`;
+}
+
+/** 与 FIRST_PULL_DONE_KEY 同理：协作空间至少拉取一次后才自动推，避免覆盖队友数据 */
+export function teamFirstPullDoneKey(teamId: string): string {
+  return `todo-calendar-team-first-pull-${teamId}`;
+}
+
 export function getAccountHttpOrigin(): string {
   const fromEnv = import.meta.env.VITE_ACCOUNT_HTTP_BASE?.trim();
   if (fromEnv) return fromEnv.replace(/\/$/, '');

@@ -165,3 +165,106 @@ export function restoreSnapshotHistory(token: string, historyId: string) {
     payload: { token, historyId },
   });
 }
+
+export function teamCreate(token: string, name?: string) {
+  return postAccountAction<{
+    teamId: string;
+    name: string;
+    members: string[];
+    peerReadOnly?: boolean;
+  }>({
+    action: 'team-create',
+    payload: { token, name },
+  });
+}
+
+export function teamJoin(token: string, teamId: string) {
+  return postAccountAction<{
+    teamId: string;
+    name: string;
+    members: string[];
+    alreadyMember?: boolean;
+    peerReadOnly?: boolean;
+    ownerEmail?: string | null;
+  }>({
+    action: 'team-join',
+    payload: { token, teamId },
+  });
+}
+
+export function teamLeave(token: string, teamId: string) {
+  return postAccountAction<{
+    left: boolean;
+    teamDeleted?: boolean;
+    members?: string[];
+    ownerEmail?: string | null;
+  }>({
+    action: 'team-leave',
+    payload: { token, teamId },
+  });
+}
+
+export function teamGet(token: string, teamId: string) {
+  return postAccountAction<{
+    teamId: string;
+    name: string;
+    members: string[];
+    ownerEmail?: string | null;
+    peerReadOnly?: boolean;
+    version: number;
+    updatedAt?: number | null;
+  }>({
+    action: 'team-get',
+    payload: { token, teamId },
+  });
+}
+
+export function teamPull(token: string, teamId: string) {
+  return postAccountAction<{
+    teamId: string;
+    name: string;
+    members: string[];
+    ownerEmail?: string | null;
+    peerReadOnly?: boolean;
+    snapshot: unknown;
+    updatedAt?: number | null;
+    version: number;
+    lastWriterDeviceId?: string | null;
+    lastWriterPlatform?: string | null;
+  }>({
+    action: 'team-pull',
+    payload: { token, teamId },
+  });
+}
+
+export function teamPush(
+  token: string,
+  teamId: string,
+  snapshot: unknown,
+  opts?: { baseVersion?: number; deviceId?: string; platform?: string; force?: boolean }
+) {
+  return postAccountAction<{
+    teamId: string;
+    updatedAt: number;
+    version: number;
+    forceApplied?: boolean;
+  }>({
+    action: 'team-push',
+    payload: {
+      token,
+      teamId,
+      snapshot,
+      baseVersion: opts?.baseVersion ?? 0,
+      deviceId: opts?.deviceId,
+      platform: opts?.platform ?? 'web',
+      force: opts?.force === true,
+    },
+  });
+}
+
+export function teamSetPeerReadOnly(token: string, teamId: string, peerReadOnly: boolean) {
+  return postAccountAction<{ teamId: string; peerReadOnly: boolean }>({
+    action: 'team-set-peer-read-only',
+    payload: { token, teamId, peerReadOnly },
+  });
+}

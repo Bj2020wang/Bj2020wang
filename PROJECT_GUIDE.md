@@ -1,8 +1,8 @@
-# 项目说明与功能入口（v0.1.6）
+# 项目说明与功能入口（v0.2.0）
 
 这份文档给你做长期参考：帮助你快速知道“哪个文件负责什么、功能入口在哪、以后怎么加功能不混乱”。
 
-> **版本**：应用与安装包以 **`src-tauri/tauri.conf.json` 的 `version`** 为准（当前 **0.1.6**），并与 Git 标签 **`v0.1.6`** 对齐；详见 CHANGELOG 与 `.cursorrules` 发布约定。
+> **版本**：应用与安装包以 **`src-tauri/tauri.conf.json` 的 `version`** 为准（当前 **0.2.0**），并与 Git 标签 **`v0.2.0`** 对齐；详见 CHANGELOG 与 `.cursorrules` 发布约定。
 
 ## 1. 目录与文件职责（关键）
 
@@ -18,8 +18,17 @@
 - `src/features/account/dbAuthUid.ts`  
   邮箱 → `dbAuthUid`（SHA-256 十六进制前 32 位），与云函数 `newworld` 算法一致。
 
+- `src/features/account/config.ts`  
+  CloudBase 环境、HTTP 路径、账号本地键；**工作区** `WORKSPACE_MODE_KEY` / `ACTIVE_TEAM_ID_KEY`；协作版控 `teamBaseVersionStorageKey`、首次协作拉取 `teamFirstPullDoneKey`。
+
+- `src/features/account/authApi.ts`  
+  `postAccountAction` 及个人云 `pull`/`push`；**协作** `teamCreate` / `teamJoin` / `teamLeave` / `teamGet` / `teamPull` / `teamPush` / `teamSetPeerReadOnly`。
+
+- `cloudfunctions/newworld/index.js`  
+  云函数：发码、验码、个人快照、历史、**协作** `team_*`；协作集合 **`team_snapshots`**；`peerReadOnly` 时仅 `ownerEmail` 可 `team-push`；`snapshot` 为 `null` 时用 **`_.set(snapshotForStore(...))`** 写入。
+
 - `src/App.tsx`  
-  业务总中枢。主要状态和规则都在这里：Todo、日历事件、计数、笔记、本地存储、导入导出、视图切换。
+  业务总中枢。主要状态和规则都在这里：Todo、日历事件、计数、笔记、本地存储、导入导出、视图切换；**工作区模式**（个人云 / 协作云）、协作版控与协作侧防抖自动 `team-push`。
 
 - `src/components/TodoSidebar.tsx`  
   左侧 Todo 清单区域：新增/编辑/删除、分类筛选、笔记输入、导入导出入口按钮。
@@ -212,8 +221,11 @@
 | 环境变量声明 | `src/vite-env.d.ts` | `VITE_CLOUDBASE_ENV_ID` / `VITE_ACCOUNT_HTTP_BASE` | 供 TS 校验与读取 |
 | 接口封装总入口 | `src/features/account/authApi.ts` | `postAccountAction()` | 统一 `POST /test` + Bearer |
 | 云函数（生产逻辑） | `cloudfunctions/newworld/index.js` | `exports.main` | 部署到 CloudBase 函数 `newworld` |
+| 创建/加入/退出协作、队友权限 | `AccountLoginModal.tsx` | 双人协作卡片、`handleTeamCreate` 等 | `authApi.team*` → `/test` `action=team-*` |
+| 协作拉取/推送按钮 | `AccountLoginModal.tsx` | `handlePull` / `handlePush` 协作分支 | `team-pull` / `team-push` |
+| 工作区切换与协作自动推 | `App.tsx` | `switchToTeamWorkspace`、`switchToPersonalWorkspace`、防抖 `teamPush` | 见 `config.ts` 工作区键 |
 
-一句话定位法：按钮问题看 `AccountLoginModal`；接口问题看 `authApi`；`ACTION_FORBIDDEN` 先查路由身份认证；拉取/推送问题看 `App.tsx` 快照导入导出函数；云端逻辑以 `cloudfunctions/newworld/index.js` 为准；**登录态不一致先查是否未包在 `AccountAuthProvider` 或误用 `useAccountAuth` 双实例。**
+一句话定位法：按钮问题看 `AccountLoginModal`；接口问题看 `authApi`；`ACTION_FORBIDDEN` 先查路由身份认证；拉取/推送问题看 `App.tsx` 快照导入导出函数；云端逻辑以 `cloudfunctions/newworld/index.js` 为准；**登录态不一致先查是否未包在 `AccountAuthProvider` 或误用 `useAccountAuth` 双实例。** **协作问题**先确认已部署含 `team-*` 的 `newworld`，且库中存在 **`team_snapshots`**。
 
 ### 7.2 开启 HTTP 身份认证后出现 403
 
@@ -278,14 +290,43 @@
 | 下行实时（可选） | `@cloudbase/js-sdk` `watch` | 依赖自定义登录 + 库规则；当前环境易 `INIT_WATCH_FAIL`，**不作为唯一依赖**。 |
 | 下行兜底 | 云函数 `pull` 轮询 | `AccountLoginModal` 内 `watch` 报错后约 **15s** 一次，与手动拉取同路径。 |
 | 上行 | 云函数 `push` + **`App` 防抖自动 push** | 本地变更后约 **1.2s** 推送；须已完成至少一次「拉取云端」。 |
+| 协作上行/下行 | 云函数 **`team-pull` / `team-push`** + `App` 在协作工作区下防抖 **`teamPush`** | 与个人云 **隔离**；须完成协作侧首次拉取标记（`teamFirstPullDoneKey`）后才自动推。 |
 
 ### 10.2 数据字段
 
 - `user_snapshots` 除原有 `email`、`snapshot`、`version`、`updatedAt` 等外，增加 **`dbAuthUid`**（与邮箱规范化后 SHA-256 前 32 位十六进制一致），供规则 `doc.dbAuthUid == auth.uid` 使用。  
 - 云函数在 **验码、pull、push** 路径会 **补齐** 旧文档的 `dbAuthUid`。
 
+- **`team_snapshots`（双人协作，v0.2.0）**：按 **`teamId`** 一条文档；字段含 `members`（最多 2 人）、`ownerEmail`、`peerReadOnly`（true 时仅创建者可 `team-push`）、`snapshot`、`version` 等。与个人云 **不自动同步**，切换工作区时分别 `pull` 对应数据源。
+
 ### 10.3 前端关键约定
 
 - **全应用只有一份账号状态**：`main.tsx` 使用 `AccountAuthProvider`；业务代码用 **`useSharedAccountAuth()`**，不要与 `useAccountAuth()` 混用导致双实例。  
 - **顶栏同步状态**：登录后展示「已登录 · 拉/推 最近时间」；若 watch 失败走 HTTP 轮询，会追加 **「轮询兜底」**；鼠标悬停可看完整文案。  
 - **同步诊断日志**：仅在 `.env` 设置 **`VITE_SYNC_DEBUG=true`**（见 `.env.example`）并重启 `npm run dev` / 重新打包后，才会在控制台输出 **`[sync-debug]`**（watch / poll 等）；默认关闭以免刷屏。同类告警约 **30s** 内节流一次。
+
+## 11. 双人协作速查（v0.2.0）
+
+### 11.1 产品语义
+
+- **个人云**：数据在 `user_snapshots`（按邮箱），仅本人默认语义下的私有同步。  
+- **协作云**：数据在 `team_snapshots`（按 `teamId`），两人共享**同一份** `snapshot`（MVP 最多 2 人）。两套云 **互不自动合并**，切换工作区会改「当前跟哪朵云对齐」。  
+- **队友权限**：创建者可在账号弹窗选择 **对方可读写** / **对方只读**（`peerReadOnly`）；只读成员不可 `team-push`，也不可开协作自动推送。
+
+### 11.2 云函数 action 一览（协作）
+
+| action | 说明 |
+|--------|------|
+| `team-create` | 创建协作空间，返回 `teamId` |
+| `team-join` | 加入指定 `teamId` |
+| `team-leave` | 退出；最后一人退出可删除文档 |
+| `team-get` | 元数据（成员、`peerReadOnly`、`version` 等） |
+| `team-pull` | 拉取协作快照 |
+| `team-push` | 推送协作快照（409 版本冲突同个人云） |
+| `team-set-peer-read-only` | 仅创建者可调 |
+
+### 11.3 运维注意
+
+- 控制台需存在集合 **`team_snapshots`**；部署的 `newworld` 须包含上述 action。  
+- 云数据库 `update` 在 **`snapshot` 为 `null`** 时禁止子路径合并；实现上已对 **`push` / `team-push`** 的 `snapshot` 使用 **`_.set(...)`**（见 `snapshotForStore`）。  
+- 排查错误优先看 **云函数 `newworld` → 日志**；若仍为笼统 500，对照 `index.js` 外层 `catch` 是否已带错误摘要。

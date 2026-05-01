@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { useSharedAccountAuth } from './AccountAuthContext';
+import * as authApi from './authApi';
 import { AccountSyncConflictError } from './authApi';
 import type { SnapshotHistoryItem } from './authApi';
+import { teamFirstPullDoneKey } from './config';
 import { watchUserSnapshotByEmail } from './userSnapshotDb';
 import type { UserSnapshotDocPayload } from './userSnapshotDb';
 import { syncDebugInfo, syncDebugWarn } from './syncDebug';
@@ -39,6 +41,18 @@ interface AccountLoginModalProps {
   onPushSnapshot: () => unknown;
   /** 顶栏一行文案，例如「已登录 · 拉 14:05 · 推 14:06 · 轮询兜底」 */
   onRuntimeStatusChange?: (statusLine: string) => void;
+  /** 个人云 vs 双人协作（team_snapshots） */
+  workspaceMode?: 'personal' | 'team';
+  activeTeamId?: string | null;
+  teamBaseVersion?: number;
+  onSwitchToTeamWorkspace?: (teamId: string) => Promise<void>;
+  /** skipTeamFlush：已调用 team-leave 等场景，勿再 team-push */
+  onSwitchToPersonalWorkspace?: (opts?: { skipTeamFlush?: boolean }) => Promise<void>;
+  onTeamCloudPulled?: (teamId: string, snapshot: unknown, version: number) => void;
+  onTeamPushedVersion?: (teamId: string, version: number) => void;
+  teamPeerReadOnly?: boolean;
+  teamOwnerEmail?: string | null;
+  onTeamWorkspaceMeta?: (meta: { peerReadOnly: boolean; ownerEmail: string | null }) => void;
 }
 
 export default function AccountLoginModal({
@@ -47,6 +61,16 @@ export default function AccountLoginModal({
   onPullSnapshot,
   onPushSnapshot,
   onRuntimeStatusChange,
+  workspaceMode = 'personal',
+  activeTeamId = null,
+  teamBaseVersion = 0,
+  onSwitchToTeamWorkspace,
+  onSwitchToPersonalWorkspace,
+  onTeamCloudPulled,
+  onTeamPushedVersion,
+  teamPeerReadOnly = false,
+  teamOwnerEmail = null,
+  onTeamWorkspaceMeta,
 }: AccountLoginModalProps) {
   const {
     businessToken,
@@ -62,6 +86,7 @@ export default function AccountLoginModal({
     restoreSnapshotHistory,
     baseVersion,
     updateBaseVersion,
+    deviceId,
   } = useSharedAccountAuth();
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
@@ -100,6 +125,8 @@ export default function AccountLoginModal({
     return Number.isFinite(n) ? n : null;
   });
   const [pollFallbackActive, setPollFallbackActive] = useState(false);
+  const [teamJoinId, setTeamJoinId] = useState('');
+  const [teamMembersHint, setTeamMembersHint] = useState('');
   const lastActivityAtRef = useRef(Date.now());
   const lastAutoPushAtRef = useRef(0);
   const lastSyncActionAtRef = useRef(0);
@@ -109,6 +136,18 @@ export default function AccountLoginModal({
   const pullSnapshotRef = useRef(pullSnapshot);
   pullSnapshotRef.current = pullSnapshot;
 
+  const isTeamOwner =
+    !!accountEmail &&
+    !!teamOwnerEmail &&
+    accountEmail.trim().toLowerCase() === teamOwnerEmail.trim().toLowerCase();
+  const teamPushForbidden =
+    workspaceMode === 'team' &&
+    !!activeTeamId &&
+    teamPeerReadOnly &&
+    !!accountEmail &&
+    !!teamOwnerEmail &&
+    accountEmail.trim().toLowerCase() !== teamOwnerEmail.trim().toLowerCase();
+
   useEffect(() => {
     baseVersionRef.current = baseVersion;
   }, [baseVersion]);
@@ -117,6 +156,10 @@ export default function AccountLoginModal({
   useEffect(() => {
     if (typeof window === 'undefined' || !businessToken) return;
     if (!accountEmail) return;
+    if (workspaceMode === 'team' && activeTeamId) {
+      setPollFallbackActive(false);
+      return;
+    }
 
     setPollFallbackActive(false);
     syncDebugInfo('watch start', {
@@ -240,10 +283,19 @@ export default function AccountLoginModal({
       syncDebugInfo('watch cleanup', { email: accountEmail, ts: Date.now() });
       closeFn?.();
     };
-  }, [accountEmail, businessToken, onPullSnapshot, updateBaseVersion]);
+  }, [accountEmail, activeTeamId, businessToken, onPullSnapshot, updateBaseVersion, workspaceMode]);
 
   const emitIdleStatusLine = useCallback(() => {
     if (!businessToken) return;
+    if (workspaceMode === 'team' && activeTeamId) {
+      const line = `已登录 · 协作 ${activeTeamId} · 拉 ${formatSyncShortTime(lastPullAt)} · 推 ${formatSyncShortTime(
+        lastPushAt
+      )}`;
+      if (line === lastReportedRuntimeRef.current) return;
+      lastReportedRuntimeRef.current = line;
+      onRuntimeStatusChange?.(line);
+      return;
+    }
     const pull = formatSyncShortTime(lastPullAt);
     const push = formatSyncShortTime(lastPushAt);
     const poll = pollFallbackActive ? ' · 轮询兜底' : '';
@@ -251,7 +303,7 @@ export default function AccountLoginModal({
     if (line === lastReportedRuntimeRef.current) return;
     lastReportedRuntimeRef.current = line;
     onRuntimeStatusChange?.(line);
-  }, [lastPullAt, lastPushAt, pollFallbackActive, businessToken, onRuntimeStatusChange]);
+  }, [activeTeamId, lastPullAt, lastPushAt, pollFallbackActive, businessToken, onRuntimeStatusChange, workspaceMode]);
 
   const reportRuntime = useCallback(
     (phase: '未登录' | '同步中' | '空闲') => {
@@ -279,7 +331,29 @@ export default function AccountLoginModal({
     if (runtimePhaseRef.current === '空闲' && businessToken) {
       emitIdleStatusLine();
     }
-  }, [emitIdleStatusLine, businessToken]);
+  }, [emitIdleStatusLine, businessToken, workspaceMode, activeTeamId]);
+
+  useEffect(() => {
+    if (!open || !businessToken || workspaceMode !== 'team' || !activeTeamId) {
+      if (!open) setTeamMembersHint('');
+      return;
+    }
+    let cancelled = false;
+    void authApi
+      .teamGet(businessToken, activeTeamId)
+      .then((res) => {
+        if (cancelled) return;
+        setTeamMembersHint((res.data?.members ?? []).join(', '));
+        onTeamWorkspaceMeta?.({
+          peerReadOnly: res.data?.peerReadOnly === true,
+          ownerEmail: typeof res.data?.ownerEmail === 'string' ? res.data.ownerEmail : null,
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [open, businessToken, workspaceMode, activeTeamId, onTeamWorkspaceMeta]);
 
   const readUpdatedAt = (value: unknown): number | null => {
     if (!value || typeof value !== 'object') return null;
@@ -360,6 +434,10 @@ export default function AccountLoginModal({
 
     let cancelled = false;
     const tick = async () => {
+      if (workspaceMode === 'team' && activeTeamId) {
+        reportRuntime('空闲');
+        return;
+      }
       reportRuntime('同步中');
       try {
         const summary = await checkSyncStatus(businessToken);
@@ -447,7 +525,7 @@ export default function AccountLoginModal({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [autoPushEnabled, baseVersion, businessToken, busy, hasPulledOnce, reportRuntime]);
+  }, [activeTeamId, autoPushEnabled, baseVersion, businessToken, busy, hasPulledOnce, reportRuntime, workspaceMode]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -477,6 +555,120 @@ export default function AccountLoginModal({
       window.removeEventListener('beforeunload', handler);
     };
   }, [businessToken, hasPendingSync]);
+
+  const handleTeamCreate = async () => {
+    setError('');
+    if (!businessToken) {
+      setError('请先完成账号登录');
+      return;
+    }
+    if (!onSwitchToTeamWorkspace) {
+      setError('协作切换未配置');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await authApi.teamCreate(businessToken);
+      const id = res.data?.teamId;
+      if (!id) throw new Error('未返回 teamId');
+      setTeamMembersHint((res.data?.members ?? []).join(', '));
+      await onSwitchToTeamWorkspace(id);
+      setHint(`已创建协作空间，ID：${id}（可复制给队友加入）`);
+      setTeamJoinId('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '创建失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleTeamJoin = async () => {
+    setError('');
+    if (!businessToken) {
+      setError('请先完成账号登录');
+      return;
+    }
+    const tid = teamJoinId.trim();
+    if (!tid) {
+      setError('请填写协作空间 ID');
+      return;
+    }
+    if (!onSwitchToTeamWorkspace) {
+      setError('协作切换未配置');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await authApi.teamJoin(businessToken, tid);
+      setTeamMembersHint((res.data?.members ?? []).join(', '));
+      await onSwitchToTeamWorkspace(tid);
+      setHint(res.data?.alreadyMember ? '已在该协作空间，已切换' : '已加入并切换到协作空间');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '加入失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleTeamLeave = async () => {
+    setError('');
+    if (!businessToken || !activeTeamId) {
+      setError('请先登录并进入协作空间');
+      return;
+    }
+    if (!window.confirm('确定退出协作空间？若你是最后一人，空间会被删除。')) return;
+    setBusy(true);
+    try {
+      await authApi.teamLeave(businessToken, activeTeamId);
+      setTeamJoinId('');
+      setTeamMembersHint('');
+      await onSwitchToPersonalWorkspace?.({ skipTeamFlush: true });
+      setHint('已退出协作空间');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '退出失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSetTeamPeerReadOnly = async (nextPeerReadOnly: boolean) => {
+    setError('');
+    if (!businessToken || !activeTeamId || !isTeamOwner) {
+      setError('仅创建者可修改该选项');
+      return;
+    }
+    setBusy(true);
+    try {
+      await authApi.teamSetPeerReadOnly(businessToken, activeTeamId, nextPeerReadOnly);
+      onTeamWorkspaceMeta?.({
+        peerReadOnly: nextPeerReadOnly,
+        ownerEmail: teamOwnerEmail,
+      });
+      setHint(
+        nextPeerReadOnly
+          ? '已设为「对方只读」：队友可拉取、不可推送到协作云端'
+          : '已设为「对方可读写」：双方均可推送到协作云端'
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '保存失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSwitchToPersonalOnly = async () => {
+    setError('');
+    if (!onSwitchToPersonalWorkspace) return;
+    setBusy(true);
+    try {
+      await onSwitchToPersonalWorkspace();
+      setHint('已切回个人云工作区');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '切换失败');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const handleSend = async () => {
     setError('');
@@ -518,6 +710,32 @@ export default function AccountLoginModal({
     }
     setBusy(true);
     try {
+      if (workspaceMode === 'team' && activeTeamId) {
+        const localSnapshot = onPushSnapshot();
+        const localUpdatedAt = readUpdatedAt(localSnapshot);
+        const res = await authApi.teamPull(businessToken, activeTeamId);
+        const cloudUpdatedAt = typeof res.data?.updatedAt === 'number' ? res.data.updatedAt : null;
+        const confirmed = window.confirm(
+          `确认用协作云端数据合并到本地吗？\n注意：会按规则合并，可能覆盖本地未协作的改动。\n云端写入时间：${formatTime(
+            cloudUpdatedAt
+          )}\n本地保存时间：${formatTime(localUpdatedAt)}`
+        );
+        if (!confirmed) {
+          setHint('已取消拉取协作云端');
+          return;
+        }
+        const ver = typeof res.data?.version === 'number' ? res.data.version : 0;
+        onTeamWorkspaceMeta?.({
+          peerReadOnly: res.data?.peerReadOnly === true,
+          ownerEmail: typeof res.data?.ownerEmail === 'string' ? res.data.ownerEmail : null,
+        });
+        onTeamCloudPulled?.(activeTeamId, res.data?.snapshot ?? null, ver);
+        const pulledAt = Date.now();
+        setLastPullAt(pulledAt);
+        window.localStorage.setItem(ACCOUNT_LAST_PULL_AT_KEY, String(pulledAt));
+        setHint('已从协作云端拉取并合并到本地');
+        return;
+      }
       const localSnapshot = onPushSnapshot();
       const localUpdatedAt = readUpdatedAt(localSnapshot);
       const res = await pullSnapshot(businessToken);
@@ -549,8 +767,66 @@ export default function AccountLoginModal({
       setError('请先完成账号登录');
       return;
     }
+    if (workspaceMode === 'team' && activeTeamId && teamPushForbidden) {
+      setError('当前为「对方只读」，仅创建者可推送到协作云端');
+      return;
+    }
     setBusy(true);
     try {
+      if (workspaceMode === 'team' && activeTeamId) {
+        const localSnapshot = onPushSnapshot();
+        const localUpdatedAt = readUpdatedAt(localSnapshot);
+        const cloudRes = await authApi.teamPull(businessToken, activeTeamId);
+        const cloudUpdatedAt = typeof cloudRes.data?.updatedAt === 'number' ? cloudRes.data.updatedAt : null;
+        const confirmed = window.confirm(
+          `确认将本地数据推送到协作云端吗？\n本地保存时间：${formatTime(localUpdatedAt)}\n协作云端写入时间：${formatTime(
+            cloudUpdatedAt
+          )}`
+        );
+        if (!confirmed) {
+          setHint('已取消推送到协作云端');
+          return;
+        }
+        try {
+          const pushRes = await authApi.teamPush(businessToken, activeTeamId, localSnapshot, {
+            baseVersion: teamBaseVersion,
+            deviceId,
+            platform: 'web',
+          });
+          const v = pushRes.data?.version;
+          if (typeof v === 'number') onTeamPushedVersion?.(activeTeamId, v);
+        } catch (e) {
+          if (e instanceof AccountSyncConflictError) {
+            const doForce = window.confirm(
+              `协作云端版本已变化（当前基线：${teamBaseVersion}）。\n可先拉取再推送，或点「确定」强制用本地覆盖协作云端。`
+            );
+            if (doForce) {
+              const snap = onPushSnapshot();
+              const pushRes = await authApi.teamPush(businessToken, activeTeamId, snap, {
+                baseVersion: teamBaseVersion,
+                deviceId,
+                platform: 'web',
+                force: true,
+              });
+              const v = pushRes.data?.version;
+              if (typeof v === 'number') onTeamPushedVersion?.(activeTeamId, v);
+              setHint('已强制推送到协作云端');
+              const pushedAt = Date.now();
+              setLastPushAt(pushedAt);
+              window.localStorage.setItem(ACCOUNT_LAST_PUSH_AT_KEY, String(pushedAt));
+              return;
+            }
+            setHint('已取消推送，建议先拉取协作云端');
+            return;
+          }
+          throw e;
+        }
+        const pushedAt = Date.now();
+        setLastPushAt(pushedAt);
+        window.localStorage.setItem(ACCOUNT_LAST_PUSH_AT_KEY, String(pushedAt));
+        setHint('已推送到协作云端');
+        return;
+      }
       const localSnapshot = onPushSnapshot();
       const localUpdatedAt = readUpdatedAt(localSnapshot);
       const cloudRes = await pullSnapshot(businessToken);
@@ -710,12 +986,27 @@ export default function AccountLoginModal({
                 type="checkbox"
                 checked={autoPushEnabled}
                 onChange={(e) => {
-                  if (e.target.checked && !hasPulledOnce) {
+                  if (!e.target.checked) {
+                    setAutoPushEnabled(false);
+                    return;
+                  }
+                  if (workspaceMode === 'team' && activeTeamId) {
+                    if (teamPushForbidden) {
+                      window.alert('当前为「对方只读」，你不能向协作云端自动推送。');
+                      setAutoPushEnabled(false);
+                      return;
+                    }
+                    if (typeof window !== 'undefined' && window.localStorage.getItem(teamFirstPullDoneKey(activeTeamId)) !== '1') {
+                      window.alert('请先在协作空间执行一次「拉取协作云端」，再开启自动推送。');
+                      setAutoPushEnabled(false);
+                      return;
+                    }
+                  } else if (!hasPulledOnce) {
                     window.alert('首次登录请先执行一次“拉取云端”，再开启自动推送。');
                     setAutoPushEnabled(false);
                     return;
                   }
-                  setAutoPushEnabled(e.target.checked);
+                  setAutoPushEnabled(true);
                 }}
                 disabled={busy}
               />
@@ -723,8 +1014,14 @@ export default function AccountLoginModal({
             </label>
           ) : null}
 
-          {businessToken && !hasPulledOnce ? (
+          {businessToken && !hasPulledOnce && workspaceMode !== 'team' ? (
             <p className="text-xs text-amber-300">首次登录请先拉取云端，避免自动推送覆盖云端数据。</p>
+          ) : null}
+          {businessToken && workspaceMode === 'team' && activeTeamId && typeof window !== 'undefined' && window.localStorage.getItem(teamFirstPullDoneKey(activeTeamId)) !== '1' ? (
+            <p className="text-xs text-amber-300">协作空间请先「拉取协作云端」一次，再开启自动推送。</p>
+          ) : null}
+          {businessToken && workspaceMode === 'team' && activeTeamId && teamPushForbidden ? (
+            <p className="text-xs text-amber-300">当前为「对方只读」：你可拉取协作内容；推送到协作云端仅创建者可用。</p>
           ) : null}
 
           {businessToken && autoPushEnabled ? (
@@ -737,6 +1034,97 @@ export default function AccountLoginModal({
           ) : null}
           {businessToken ? (
             <p className="text-xs text-[var(--shell-text-muted)]">上次推送时间：{formatTime(lastPushAt)}</p>
+          ) : null}
+
+          {businessToken ? (
+            <div className="rounded-lg border border-[var(--shell-border-subtle)] bg-[var(--shell-elevated)] p-3 space-y-2">
+              <p className="text-xs font-medium text-[var(--shell-text-muted)]">双人协作（MVP，最多 2 人）</p>
+              <p className="text-xs text-[var(--shell-text-muted)]">
+                当前工作区：
+                {workspaceMode === 'team' && activeTeamId ? (
+                  <span className="text-emerald-300"> 协作 · {activeTeamId}</span>
+                ) : (
+                  <span> 个人云</span>
+                )}
+              </p>
+              {workspaceMode === 'team' && activeTeamId && teamMembersHint ? (
+                <p className="text-xs text-[var(--shell-text-muted)]">成员：{teamMembersHint}</p>
+              ) : null}
+              {workspaceMode === 'team' && activeTeamId && isTeamOwner ? (
+                <div className="space-y-1 rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] p-2">
+                  <p className="text-xs font-medium text-[var(--shell-text-muted)]">队友权限（仅创建者）</p>
+                  <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--shell-text-strong)]">
+                    <input
+                      type="radio"
+                      name="team-peer-mode"
+                      checked={!teamPeerReadOnly}
+                      onChange={() => void handleSetTeamPeerReadOnly(false)}
+                      disabled={busy}
+                    />
+                    对方可读写（双方均可推送到协作云端）
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--shell-text-strong)]">
+                    <input
+                      type="radio"
+                      name="team-peer-mode"
+                      checked={teamPeerReadOnly}
+                      onChange={() => void handleSetTeamPeerReadOnly(true)}
+                      disabled={busy}
+                    />
+                    对方只读（队友仅可拉取，不可推送）
+                  </label>
+                </div>
+              ) : null}
+              <label className="block text-xs font-medium text-[var(--shell-text-muted)]">
+                协作空间 ID（加入）
+                <input
+                  type="text"
+                  value={teamJoinId}
+                  onChange={(e) => setTeamJoinId(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[var(--shell-border)] bg-[var(--shell-panel)] px-3 py-2 text-sm text-[var(--shell-text-strong)] outline-none focus:border-[var(--shell-accent)]"
+                  placeholder="队友发给你的 ID"
+                  disabled={busy}
+                />
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={handleTeamCreate}
+                  className="rounded-lg border border-[var(--shell-border)] px-3 py-1.5 text-xs text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
+                >
+                  创建协作空间
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={handleTeamJoin}
+                  className="rounded-lg border border-[var(--shell-border)] px-3 py-1.5 text-xs text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
+                >
+                  加入并切换
+                </button>
+                {workspaceMode === 'team' && activeTeamId ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={handleSwitchToPersonalOnly}
+                      className="rounded-lg border border-[var(--shell-border)] px-3 py-1.5 text-xs text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
+                    >
+                      切回个人云
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={handleTeamLeave}
+                      className="rounded-lg border border-amber-700/50 px-3 py-1.5 text-xs text-amber-200 hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
+                    >
+                      退出协作
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            </div>
           ) : null}
 
           <div className="flex flex-wrap gap-2 pt-1">
@@ -764,24 +1152,26 @@ export default function AccountLoginModal({
                   onClick={handlePull}
                   className="rounded-lg border border-[var(--shell-border)] px-4 py-2 text-sm text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
                 >
-                  拉取云端
+                  {workspaceMode === 'team' && activeTeamId ? '拉取协作云端' : '拉取云端'}
                 </button>
                 <button
                   type="button"
-                  disabled={busy}
+                  disabled={busy || (workspaceMode === 'team' && !!activeTeamId && teamPushForbidden)}
                   onClick={handlePush}
                   className="rounded-lg border border-[var(--shell-border)] px-4 py-2 text-sm text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
                 >
-                  推送云端
+                  {workspaceMode === 'team' && activeTeamId ? '推送协作云端' : '推送云端'}
                 </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={handleLoadHistory}
-                  className="rounded-lg border border-[var(--shell-border)] px-4 py-2 text-sm text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
-                >
-                  查看历史
-                </button>
+                {workspaceMode !== 'team' ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={handleLoadHistory}
+                    className="rounded-lg border border-[var(--shell-border)] px-4 py-2 text-sm text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
+                  >
+                    查看历史
+                  </button>
+                ) : null}
               </>
             ) : null}
             {businessToken ? (
@@ -800,7 +1190,7 @@ export default function AccountLoginModal({
             ) : null}
           </div>
 
-          {businessToken && historyItems.length > 0 ? (
+          {businessToken && workspaceMode !== 'team' && historyItems.length > 0 ? (
             <div className="rounded-lg border border-[var(--shell-border-subtle)] bg-[var(--shell-elevated)] p-3">
               <p className="mb-2 text-xs font-medium text-[var(--shell-text-muted)]">云端历史快照（最近 3 条）</p>
               <div className="space-y-2">

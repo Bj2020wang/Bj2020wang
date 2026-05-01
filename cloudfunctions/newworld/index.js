@@ -45,11 +45,22 @@ function dbAuthUidFromEmail(email) {
 
 async function ensureSnapshotDbAuthUid(email) {
   var expected = dbAuthUidFromEmail(email);
-  var snap = await db.collection('user_snapshots').where({ email: email }).limit(1).get();
+  var snap;
+  try {
+    snap = await db.collection('user_snapshots').where({ email: email }).limit(1).get();
+  } catch (err) {
+    if (isCollectionMissingError(err)) return;
+    throw err;
+  }
   if (!snap.data || !snap.data[0]) return;
   var doc = snap.data[0];
   if (doc.dbAuthUid === expected) return;
-  await db.collection('user_snapshots').doc(doc._id).update({ dbAuthUid: expected });
+  try {
+    await db.collection('user_snapshots').doc(doc._id).update({ dbAuthUid: expected });
+  } catch (err) {
+    if (isCollectionMissingError(err)) return;
+    throw err;
+  }
 }
 
 function jsonResponse(statusCode, bodyObj) {
@@ -171,8 +182,21 @@ function isCollectionMissingError(err) {
   return msg.includes('Db or Table not exist') || msg.includes('collection not exists');
 }
 
+function errorHintForResponse(err) {
+  var detail = err && err.message ? String(err.message).trim().slice(0, 240) : '';
+  return detail || '';
+}
+
 function toNumberOrNull(v) {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+/** 云数据库对字段为 null 的 object 做局部合并时会报 Cannot create field ... in element {snapshot: null}，需用 _.set 整体替换 */
+function snapshotForStore(raw) {
+  if (raw != null && typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw;
+  }
+  return {};
 }
 
 exports.main = async function (event) {
@@ -202,12 +226,38 @@ exports.main = async function (event) {
         return await handleListHistory(payload);
       case 'restore-history':
         return await handleRestoreHistory(payload);
+      case 'team-create':
+        return await handleTeamCreate(payload);
+      case 'team-join':
+        return await handleTeamJoin(payload);
+      case 'team-leave':
+        return await handleTeamLeave(payload);
+      case 'team-get':
+        return await handleTeamGet(payload);
+      case 'team-pull':
+        return await handleTeamPull(payload);
+      case 'team-push':
+        return await handleTeamPush(payload);
+      case 'team-set-peer-read-only':
+        return await handleTeamSetPeerReadOnly(payload);
       default:
         return fail(404, 404, 'unknown action');
     }
   } catch (err) {
-    console.error('newworld error', err);
-    return fail(500, 500, '服务器繁忙，请稍后重试');
+    console.error('newworld error', action, err && err.stack ? err.stack : err);
+    if (isCollectionMissingError(err)) {
+      return fail(
+        503,
+        503,
+        '数据库集合不存在或未创建（常见于 user_snapshots），请在云开发控制台创建集合后重试'
+      );
+    }
+    var hint = errorHintForResponse(err);
+    return fail(
+      500,
+      500,
+      hint ? '服务异常：' + hint + '（亦可查看云函数 newworld 运行日志）' : '服务器繁忙，请稍后重试'
+    );
   }
 };
 
@@ -382,9 +432,22 @@ async function handlePull(payload) {
 
   await ensureSnapshotDbAuthUid(email);
 
-  var snap = await db.collection('user_snapshots').where({ email: email }).limit(1).get();
+  var snap;
+  try {
+    snap = await db.collection('user_snapshots').where({ email: email }).limit(1).get();
+  } catch (err) {
+    if (isCollectionMissingError(err)) {
+      return ok({
+        email: email,
+        snapshot: null,
+        updatedAt: null,
+        version: 0,
+      });
+    }
+    throw err;
+  }
   if (!snap.data || !snap.data[0]) {
-    return ok({ email: email, snapshot: null, updatedAt: null });
+    return ok({ email: email, snapshot: null, updatedAt: null, version: 0 });
   }
 
   var doc = snap.data[0];
@@ -453,7 +516,7 @@ async function handlePush(payload) {
       if (!isCollectionMissingError(err)) throw err;
     }
     await db.collection('user_snapshots').doc(existing.data[0]._id).update({
-      snapshot: snapshot,
+      snapshot: _.set(snapshotForStore(snapshot)),
       updatedAt: updatedAt,
       version: currentVersion + 1,
       lastWriterDeviceId: deviceId,
@@ -469,7 +532,7 @@ async function handlePush(payload) {
   } else {
     await db.collection('user_snapshots').add({
       email: email,
-      snapshot: snapshot,
+      snapshot: snapshotForStore(snapshot),
       updatedAt: updatedAt,
       version: 1,
       lastWriterDeviceId: deviceId,
@@ -546,5 +609,284 @@ async function handleRestoreHistory(payload) {
     snapshot: item.snapshot != null ? item.snapshot : null,
     backupAt: typeof item.backupAt === 'number' ? item.backupAt : null,
     updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : null,
+  });
+}
+
+/** ---------- 双人协作空间（MVP：最多 2 人，共享一份 snapshot / version） ---------- */
+
+function generateTeamId() {
+  return randomToken().slice(0, 16);
+}
+
+async function getTeamDocByTeamId(teamId) {
+  var tid = String(teamId || '').trim();
+  if (!tid) return null;
+  var res = await db.collection('team_snapshots').where({ teamId: tid }).limit(1).get();
+  if (!res.data || !res.data[0]) return null;
+  return res.data[0];
+}
+
+function normalizeMemberList(members) {
+  if (!Array.isArray(members)) return [];
+  var out = [];
+  var seen = {};
+  for (var i = 0; i < members.length; i++) {
+    var e = normalizeEmail(members[i]);
+    if (e && isEmailLike(e) && !seen[e]) {
+      seen[e] = true;
+      out.push(e);
+    }
+  }
+  return out;
+}
+
+function assertTeamMember(email, doc) {
+  var members = normalizeMemberList(doc.members);
+  var norm = normalizeEmail(email);
+  if (!members.includes(norm)) {
+    return fail(403, 403, '无权访问该协作空间');
+  }
+  return null;
+}
+
+async function handleTeamCreate(payload) {
+  var email = await resolveEmailByToken(payload.token);
+  if (!email) {
+    return fail(401, 401, '登录已失效，请重新验证');
+  }
+  var name = String(payload.name || '协作空间').trim().slice(0, 40) || '协作空间';
+  var teamId = generateTeamId();
+  var norm = normalizeEmail(email);
+  await db.collection('team_snapshots').add({
+    teamId: teamId,
+    name: name,
+    ownerEmail: norm,
+    members: [norm],
+    /** false：双方可推送；true：除创建者外成员仅可拉取（只读） */
+    peerReadOnly: false,
+    snapshot: null,
+    version: 0,
+    updatedAt: Date.now(),
+  });
+  return ok({ teamId: teamId, name: name, members: [norm], peerReadOnly: false });
+}
+
+async function handleTeamJoin(payload) {
+  var email = await resolveEmailByToken(payload.token);
+  if (!email) {
+    return fail(401, 401, '登录已失效，请重新验证');
+  }
+  var teamId = String(payload.teamId || '').trim();
+  if (!teamId) {
+    return fail(400, 400, 'teamId 必填');
+  }
+  var doc = await getTeamDocByTeamId(teamId);
+  if (!doc) {
+    return fail(404, 404, '协作空间不存在');
+  }
+  var members = normalizeMemberList(doc.members);
+  var norm = normalizeEmail(email);
+  if (members.includes(norm)) {
+    return ok({
+      teamId: teamId,
+      name: typeof doc.name === 'string' ? doc.name : '协作空间',
+      members: members,
+      alreadyMember: true,
+      peerReadOnly: doc.peerReadOnly === true,
+      ownerEmail: typeof doc.ownerEmail === 'string' ? doc.ownerEmail : null,
+    });
+  }
+  if (members.length >= 2) {
+    return fail(400, 400, '协作空间已满（当前 MVP 最多 2 人）');
+  }
+  members.push(norm);
+  await db.collection('team_snapshots').doc(doc._id).update({ members: members });
+  return ok({
+    teamId: teamId,
+    name: typeof doc.name === 'string' ? doc.name : '协作空间',
+    members: members,
+    alreadyMember: false,
+    peerReadOnly: doc.peerReadOnly === true,
+    ownerEmail: typeof doc.ownerEmail === 'string' ? doc.ownerEmail : null,
+  });
+}
+
+async function handleTeamLeave(payload) {
+  var email = await resolveEmailByToken(payload.token);
+  if (!email) {
+    return fail(401, 401, '登录已失效，请重新验证');
+  }
+  var teamId = String(payload.teamId || '').trim();
+  if (!teamId) {
+    return fail(400, 400, 'teamId 必填');
+  }
+  var doc = await getTeamDocByTeamId(teamId);
+  if (!doc) {
+    return fail(404, 404, '协作空间不存在');
+  }
+  var err = assertTeamMember(email, doc);
+  if (err) return err;
+  var members = normalizeMemberList(doc.members);
+  var norm = normalizeEmail(email);
+  members = members.filter(function (m) {
+    return m !== norm;
+  });
+  var ownerEmail = typeof doc.ownerEmail === 'string' ? normalizeEmail(doc.ownerEmail) : norm;
+  if (ownerEmail === norm && members.length > 0) {
+    ownerEmail = members[0];
+  }
+  if (members.length === 0) {
+    await db.collection('team_snapshots').doc(doc._id).remove();
+    return ok({ left: true, teamDeleted: true, members: [] });
+  }
+  await db.collection('team_snapshots').doc(doc._id).update({
+    members: members,
+    ownerEmail: ownerEmail,
+  });
+  return ok({ left: true, teamDeleted: false, members: members, ownerEmail: ownerEmail });
+}
+
+async function handleTeamGet(payload) {
+  var email = await resolveEmailByToken(payload.token);
+  if (!email) {
+    return fail(401, 401, '登录已失效，请重新验证');
+  }
+  var teamId = String(payload.teamId || '').trim();
+  if (!teamId) {
+    return fail(400, 400, 'teamId 必填');
+  }
+  var doc = await getTeamDocByTeamId(teamId);
+  if (!doc) {
+    return fail(404, 404, '协作空间不存在');
+  }
+  var err = assertTeamMember(email, doc);
+  if (err) return err;
+  var members = normalizeMemberList(doc.members);
+  return ok({
+    teamId: teamId,
+    name: typeof doc.name === 'string' ? doc.name : '协作空间',
+    members: members,
+    ownerEmail: typeof doc.ownerEmail === 'string' ? doc.ownerEmail : null,
+    peerReadOnly: doc.peerReadOnly === true,
+    version: toNumberOrNull(doc.version) != null ? doc.version : 0,
+    updatedAt: typeof doc.updatedAt === 'number' ? doc.updatedAt : null,
+  });
+}
+
+async function handleTeamSetPeerReadOnly(payload) {
+  var email = await resolveEmailByToken(payload.token);
+  if (!email) {
+    return fail(401, 401, '登录已失效，请重新验证');
+  }
+  var teamId = String(payload.teamId || '').trim();
+  if (!teamId) {
+    return fail(400, 400, 'teamId 必填');
+  }
+  var peerReadOnly = payload.peerReadOnly === true;
+  var doc = await getTeamDocByTeamId(teamId);
+  if (!doc) {
+    return fail(404, 404, '协作空间不存在');
+  }
+  var err = assertTeamMember(email, doc);
+  if (err) return err;
+  var ownerNorm = typeof doc.ownerEmail === 'string' ? normalizeEmail(doc.ownerEmail) : '';
+  if (!ownerNorm || ownerNorm !== normalizeEmail(email)) {
+    return fail(403, 403, '仅创建者可修改该选项');
+  }
+  await db.collection('team_snapshots').doc(doc._id).update({ peerReadOnly: peerReadOnly });
+  return ok({ teamId: teamId, peerReadOnly: peerReadOnly });
+}
+
+async function handleTeamPull(payload) {
+  var email = await resolveEmailByToken(payload.token);
+  if (!email) {
+    return fail(401, 401, '登录已失效，请重新验证');
+  }
+  var teamId = String(payload.teamId || '').trim();
+  if (!teamId) {
+    return fail(400, 400, 'teamId 必填');
+  }
+  var doc = await getTeamDocByTeamId(teamId);
+  if (!doc) {
+    return fail(404, 404, '协作空间不存在');
+  }
+  var err = assertTeamMember(email, doc);
+  if (err) return err;
+  var members = normalizeMemberList(doc.members);
+  return ok({
+    teamId: teamId,
+    name: typeof doc.name === 'string' ? doc.name : '协作空间',
+    members: members,
+    ownerEmail: typeof doc.ownerEmail === 'string' ? doc.ownerEmail : null,
+    peerReadOnly: doc.peerReadOnly === true,
+    snapshot: doc.snapshot != null ? doc.snapshot : null,
+    updatedAt: doc.updatedAt != null ? doc.updatedAt : null,
+    version: toNumberOrNull(doc.version) != null ? doc.version : 0,
+    lastWriterDeviceId: typeof doc.lastWriterDeviceId === 'string' ? doc.lastWriterDeviceId : null,
+    lastWriterPlatform: typeof doc.lastWriterPlatform === 'string' ? doc.lastWriterPlatform : null,
+  });
+}
+
+async function handleTeamPush(payload) {
+  var email = await resolveEmailByToken(payload.token);
+  if (!email) {
+    return fail(401, 401, '登录已失效，请重新验证');
+  }
+  var teamId = String(payload.teamId || '').trim();
+  if (!teamId) {
+    return fail(400, 400, 'teamId 必填');
+  }
+  var docRow = await getTeamDocByTeamId(teamId);
+  if (!docRow) {
+    return fail(404, 404, '协作空间不存在');
+  }
+  var err = assertTeamMember(email, docRow);
+  if (err) return err;
+  if (docRow.peerReadOnly === true) {
+    var ownerNorm = typeof docRow.ownerEmail === 'string' ? normalizeEmail(docRow.ownerEmail) : '';
+    if (ownerNorm && normalizeEmail(email) !== ownerNorm) {
+      return fail(403, 403, '当前为「对方只读」模式，仅创建者可推送到协作云端');
+    }
+  }
+  var snapshot = payload.snapshot;
+  var updatedAt = Date.now();
+  var baseVersionRaw = payload.baseVersion;
+  var baseVersion = typeof baseVersionRaw === 'number' && Number.isFinite(baseVersionRaw) ? baseVersionRaw : 0;
+  var forcePush = payload.force === true;
+  var deviceId = String(payload.deviceId || '').trim() || 'unknown-device';
+  var platform = String(payload.platform || '').trim() || 'web';
+
+  var currentVersion = toNumberOrNull(docRow.version);
+  if (currentVersion == null) currentVersion = 0;
+
+  if (!forcePush && baseVersion !== currentVersion) {
+    return jsonResponse(409, {
+      code: 409,
+      message: '协作空间数据已被队友更新，请先拉取或确认覆盖',
+      data: {
+        currentVersion: currentVersion,
+        incomingBaseVersion: baseVersion,
+        lastWriterDeviceId:
+          typeof docRow.lastWriterDeviceId === 'string' ? docRow.lastWriterDeviceId : null,
+        lastWriterPlatform:
+          typeof docRow.lastWriterPlatform === 'string' ? docRow.lastWriterPlatform : null,
+        updatedAt: typeof docRow.updatedAt === 'number' ? docRow.updatedAt : null,
+      },
+    });
+  }
+
+  await db.collection('team_snapshots').doc(docRow._id).update({
+    snapshot: _.set(snapshotForStore(snapshot)),
+    updatedAt: updatedAt,
+    version: currentVersion + 1,
+    lastWriterDeviceId: deviceId,
+    lastWriterPlatform: platform,
+    lastWriterEmail: normalizeEmail(email),
+  });
+  return ok({
+    teamId: teamId,
+    updatedAt: updatedAt,
+    version: currentVersion + 1,
+    forceApplied: forcePush,
   });
 }

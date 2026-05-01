@@ -1,3 +1,7 @@
+Todo Calendar 工程说明补充：**应用版本见 `package.json`（当前主版本线 0.2.0 含双人协作）**；详细以 `PROJECT_GUIDE.md` / `CHANGELOG.md` 为准。
+
+---
+
 Using Node.js 20, Tailwind CSS v3.4.19, and Vite v7.2.4
 
 Tailwind CSS has been set up with the shadcn theme
