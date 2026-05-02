@@ -16,7 +16,7 @@
 ---
 
 1. EXE 版本号必须与 Git 标签版本号一致。
-   - 例如：`tauri.conf.json` 的 `version` 为 `0.2.2`，则 Git 标签必须是 `v0.2.2`。
+   - 例如：`tauri.conf.json` 的 `version` 为 `0.2.3`，则 Git 标签必须是 `v0.2.3`。
 
 2. 每次发布前必须走发布脚本：
    - 命令：`powershell -ExecutionPolicy Bypass -File .\scripts\release.ps1`

@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.2.3
+
+- **前端质量门禁**：`npm run lint` 无 error；修复 `react-hooks/set-state-in-effect`（`App.tsx`、`TodoSidebar.tsx` 中对需在 effect 内更新的状态使用 `queueMicrotask`，语义基本不变）。
+- **账号 Context 拆分**：`AccountAuthProvider` 与 `useSharedAccountAuth` 分文件（`sharedAccountAuthContext.ts`、`useSharedAccountAuth.ts`），消除 Fast Refresh 规则告警，与单一登录态约定一致。
+- **同步健壮性**：`AccountLoginModal` 个人云定时同步与协作空闲双向路径对 `pullSnapshot` / `pushSnapshot` / `onPullSnapshot` / `onPushSnapshot` 使用 ref；`checkSyncStatus` 结合 `baseVersionRef` 与稳定 `useCallback`；快照比对辅助函数提升至模块级——降低定时同步读到过期闭包、版本判断不准等偶现问题概率。
+- **协作删笔记**：协作区删除本人笔记时保留归属（`App.tsx`），避免切回个人云时删除墓碑无法合并导致旧笔记复活（见较早提交说明）。
+- **依赖审计**：温和 `npm audit fix` 后剩余告警集中于 `@cloudbase/node-sdk` 传递链；不建议未经回归使用 `npm audit fix --force`。
+- **已知限制**：部分 Windows 环境下 `cargo clippy`/链接仍可能出现 `LNK1105`/`1224`，需在构建机配置 Defender 排除、`CARGO_BUILD_JOBS=1` 或独立 `CARGO_TARGET_DIR` 等后再纳入发布门禁。
+- **版本对齐**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`app` 包）均为 **0.2.3**；发布安装包与 Git 标签请使用 **`v0.2.3`**（见 `.cursorrules`）。
+
 ## v0.2.2
 
 - **协作切回个人云**：从协作工作区切到个人云时，先拉取个人快照，再仅合并协作内存中**归属当前用户**的待办、日程与笔记（`effectiveTodoOwnerEmail` / `effectiveEventOwnerEmail`；笔记须 `noteOwnerByDate` 明确为本人，无归属键的日期不合并，避免历史脏数据）。**不合并**协作侧的待办/日程删除墓碑，优先保护个人云已有数据（保守策略）。实现见 `App.tsx` 的 `buildMyCollaborationSliceForPersonalMerge` 与 `switchToPersonalWorkspace`。

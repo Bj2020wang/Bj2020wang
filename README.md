@@ -1,8 +1,14 @@
 # Todo Calendar（待办日历）
 
-**当前版本：0.2.2**（与 `package.json`、`src-tauri/tauri.conf.json` 一致）
+**当前版本：0.2.3**（与 `package.json`、`src-tauri/tauri.conf.json` 一致）
 
 基于 **React + TypeScript + Vite** 的日历与待办应用，可选 **Tauri** 打包 Windows 安装包；云端使用 **腾讯云 CloudBase**（云函数 HTTP `newworld` + 文档数据库）。
+
+## 0.2.3 维护（质量门禁与同步健壮性）
+
+- **ESLint** 无 error；账号 Context 拆分便于维护。
+- **定时同步**：登录弹窗内个人云/协作空闲同步路径使用 ref，降低偶现状态不准概率。
+- **说明**：温和 `npm audit fix` 后仍有 CloudBase 传递依赖告警；Windows 下 `cargo clippy` 若遇链接占用见 `CHANGELOG`。
 
 ## 0.2.2 亮点（协作切回个人云）
 
