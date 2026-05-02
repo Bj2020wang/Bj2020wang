@@ -1196,6 +1196,11 @@ export default function App() {
     });
     setNoteOwnerByDate((prev) => {
       if (!note.trim()) {
+        // 协作区删除本人笔记时保留 owner，避免切回个人云时无法识别本人删除墓碑。
+        if (workspaceMode === 'team' && normalizedMe) {
+          if (prev[dateKey] === normalizedMe) return prev;
+          return { ...prev, [dateKey]: normalizedMe };
+        }
         if (!(dateKey in prev)) return prev;
         const next = { ...prev };
         delete next[dateKey];
