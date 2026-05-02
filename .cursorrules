@@ -125,3 +125,16 @@
      3) **提交前（严格审查）**：按严重级别审查逻辑一致性、数据边界、删除语义、异常路径和规则符合性。
      4) **发版前（release gate）**：校验版本号、文档、Git 标签、安装包一致性与可安装性。
    - 最低门槛：**功能完成后必须先通过第 2+第 3 次验证再允许提交**；若当天发版，收工前必须完成第 4 次验证。
+
+12. Git 双远程推送（GitHub + Gitee · 强制）：
+   - **约定**：每次向远端推送时，须**同时**推送到 GitHub 与 Gitee，避免只更新一侧。
+   - **本仓库已配置**：`origin` 具有 **双 `pushurl`**（先 Gitee、后 GitHub，地址见下）。日常 **一条命令即可推两边**：
+     - 分支：`git push origin <branch>`（`<branch>` 如 `master`）
+     - 标签：`git push origin --tags`
+     - 无需再跟一条 `git push gitee`（除非本地未配置双 `pushurl` 或需单独修某一远端）。
+   - **Gitee 仓库**：`https://gitee.com/wang-jianjun2025/todolist.git`；**单独远程名** `gitee` 仍保留，便于拉取或排查；与 `origin` 双 push 并存。
+   - **新克隆 / 未配置双 pushurl 时**：先 `git remote add gitee https://gitee.com/wang-jianjun2025/todolist.git`，再对本机 `origin` 执行：
+     - `git remote set-url --add --push origin https://gitee.com/wang-jianjun2025/todolist.git`
+     - `git config --add remote.origin.pushurl https://github.com/Bj2020wang/Bj2020wang.git`（若上一步把 GitHub 从 push 列表挤掉，用此补回；以 `git remote -v` 确认 `origin` 下有两条 push）
+     - 或退而求其次：依次执行 `git push origin <branch>` 与 `git push gitee <branch>`（及各自的 `--tags`）。
+   - **AI 协助推送时**：优先使用 **`git push origin …`**（覆盖双远端）；若用户环境只有单 push，则分别 `origin` + `gitee`。若某一远端因网络失败，须明确告知哪一侧成功、哪一侧待重试。
