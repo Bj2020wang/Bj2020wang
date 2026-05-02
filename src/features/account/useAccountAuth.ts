@@ -191,3 +191,5 @@ export function useAccountAuth() {
     updateBaseVersion,
   };
 }
+
+export type AccountAuthContextValue = ReturnType<typeof useAccountAuth>;

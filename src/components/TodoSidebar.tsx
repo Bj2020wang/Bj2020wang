@@ -73,7 +73,7 @@ export default function TodoSidebar({
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    setNoteDraft(noteContent);
+    queueMicrotask(() => setNoteDraft(noteContent));
   }, [noteContent, noteDateKey]);
 
   const handleDragStart = (e: React.DragEvent, todo: TodoItem) => {

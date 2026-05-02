@@ -6,7 +6,7 @@ import WeekView from '@/components/WeekView';
 import DayView from '@/components/DayView';
 import GlobalSearchPanel from '@/features/search/GlobalSearchPanel';
 import AccountLoginModal from '@/features/account/AccountLoginModal';
-import { useSharedAccountAuth } from '@/features/account/AccountAuthContext';
+import { useSharedAccountAuth } from '@/features/account/useSharedAccountAuth';
 import * as authApi from '@/features/account/authApi';
 import { AccountSyncConflictError } from '@/features/account/authApi';
 import {
@@ -520,27 +520,33 @@ export default function App() {
 
   useEffect(() => {
     if (workspaceMode === 'team' && !activeTeamId) {
-      setWorkspaceMode('personal');
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(WORKSPACE_MODE_KEY, 'personal');
-        window.localStorage.removeItem(ACTIVE_TEAM_ID_KEY);
-      }
+      queueMicrotask(() => {
+        setWorkspaceMode('personal');
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(WORKSPACE_MODE_KEY, 'personal');
+          window.localStorage.removeItem(ACTIVE_TEAM_ID_KEY);
+        }
+      });
     }
   }, [workspaceMode, activeTeamId]);
 
   useEffect(() => {
-    if (activeTeamId) {
-      setTeamBaseVersion(readTeamBaseVersion(activeTeamId));
-    } else {
-      setTeamBaseVersion(0);
-    }
+    queueMicrotask(() => {
+      if (activeTeamId) {
+        setTeamBaseVersion(readTeamBaseVersion(activeTeamId));
+      } else {
+        setTeamBaseVersion(0);
+      }
+    });
   }, [activeTeamId]);
 
   useEffect(() => {
     if (workspaceMode !== 'team' || !activeTeamId) {
-      setTeamPeerAccess('bothPush');
-      setTeamOwnerEmail(null);
-      teamServerBaselineRef.current = null;
+      queueMicrotask(() => {
+        setTeamPeerAccess('bothPush');
+        setTeamOwnerEmail(null);
+        teamServerBaselineRef.current = null;
+      });
     }
   }, [workspaceMode, activeTeamId]);
 

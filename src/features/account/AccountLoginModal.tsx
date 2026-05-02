@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ThumbsUp, X } from 'lucide-react';
-import { useSharedAccountAuth } from './AccountAuthContext';
 import * as authApi from './authApi';
 import { AccountSyncConflictError } from './authApi';
 import type { SnapshotHistoryItem, TeamPeerAccess } from './authApi';
 import { normalizeTeamPeerAccess } from '@/lib/teamCollab';
 import { TEAM_AUTO_BIDIR_ENABLED_KEY, teamFirstPullDoneKey } from './config';
+import { useSharedAccountAuth } from './useSharedAccountAuth';
 import { watchUserSnapshotByEmail } from './userSnapshotDb';
 import type { UserSnapshotDocPayload } from './userSnapshotDb';
 import { syncDebugInfo, syncDebugWarn } from './syncDebug';
