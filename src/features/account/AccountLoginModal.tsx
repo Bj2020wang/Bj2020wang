@@ -1361,6 +1361,7 @@ export default function AccountLoginModal({
   if (!open) return null;
 
   return (
+    <>
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
       <div
         className="relative flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] shadow-xl"
@@ -1386,7 +1387,7 @@ export default function AccountLoginModal({
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-1 border-b border-[var(--shell-border-subtle)] px-3">
+        <div className="flex flex-wrap items-end gap-1 border-b border-[var(--shell-border-subtle)] px-3">
           <button type="button" className={tabBtn('login')} onClick={() => setSettingsTab('login')}>
             登录
           </button>
@@ -1396,6 +1397,16 @@ export default function AccountLoginModal({
           <button type="button" className={tabBtn('team')} onClick={() => setSettingsTab('team')}>
             协作
           </button>
+          {businessToken && !logoutChoiceOpen ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setLogoutChoiceOpen(true)}
+              className="ml-auto shrink-0 rounded-t-lg border-b-2 border-transparent px-3 py-2 text-sm font-medium text-[var(--shell-text-muted)] transition-colors hover:bg-[var(--shell-surface-hover)] hover:text-[var(--shell-text-strong)] disabled:opacity-50"
+            >
+              退出业务登录
+            </button>
+          ) : null}
         </div>
 
         {(error || hint || syncStatus) ? (
@@ -1420,7 +1431,7 @@ export default function AccountLoginModal({
                     <p className="text-xs text-[var(--shell-text-muted)]">登录邮箱：{accountEmail}</p>
                   ) : null}
                   <p className="text-xs text-[var(--shell-text-muted)]">
-                    拉取/推送、自动同步与退出请在「同步与云」；双人协作请在「协作」。
+                    拉取/推送与自动同步请在「同步与云」；退出请点顶部标签栏右侧「退出业务登录」；双人协作请在「协作」。
                   </p>
                 </div>
               ) : (
@@ -1582,53 +1593,7 @@ export default function AccountLoginModal({
                     查看历史
                   </button>
                 ) : null}
-              {!logoutChoiceOpen ? (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => setLogoutChoiceOpen(true)}
-                  className="rounded-lg border border-[var(--shell-border)] px-4 py-2 text-sm text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]"
-                >
-                  退出业务登录
-                </button>
-              ) : null}
           </div>
-
-          {logoutChoiceOpen ? (
-            <div className="rounded-lg border border-[var(--shell-border-subtle)] bg-[var(--shell-elevated)] p-3">
-              <p className="mb-2 text-sm text-[var(--shell-text)]">请选择退出方式：</p>
-              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => {
-                    void executeLogout(true);
-                  }}
-                  className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200 hover:bg-amber-500/20 disabled:opacity-50"
-                >
-                  退出并清空本机日历数据
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => {
-                    void executeLogout(false);
-                  }}
-                  className="rounded-lg border border-[var(--shell-border)] px-3 py-2 text-sm text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
-                >
-                  仅退出账号，保留本地数据
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => setLogoutChoiceOpen(false)}
-                  className="rounded-lg border border-[var(--shell-border)] px-3 py-2 text-sm text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
-                >
-                  取消
-                </button>
-              </div>
-            </div>
-          ) : null}
 
           {workspaceMode !== 'team' && historyItems.length > 0 ? (
             <div className="rounded-lg border border-[var(--shell-border-subtle)] bg-[var(--shell-elevated)] p-3">
@@ -1797,5 +1762,61 @@ export default function AccountLoginModal({
         </div>
       </div>
     </div>
+
+    {logoutChoiceOpen && businessToken ? (
+      <div
+        className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4"
+        role="presentation"
+        onClick={() => {
+          if (!busy) setLogoutChoiceOpen(false);
+        }}
+      >
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="logout-confirm-title"
+          className="w-full max-w-md rounded-xl border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] p-5 shadow-xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <h3 id="logout-confirm-title" className="text-lg font-semibold text-[var(--shell-text-strong)]">
+            退出业务登录
+          </h3>
+          <p className="mt-2 text-sm text-[var(--shell-text-muted)]">
+            请选择退出方式。退出前会尝试将本地数据推送到当前工作区对应的云端；推送失败时可选择仍是否退出。
+          </p>
+          <div className="mt-5 flex flex-col gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                void executeLogout(true);
+              }}
+              className="w-full rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-2.5 text-sm font-medium text-amber-800 dark:text-amber-200 hover:bg-amber-500/20 disabled:opacity-50"
+            >
+              退出并清空本机日历数据
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                void executeLogout(false);
+              }}
+              className="w-full rounded-lg border border-[var(--shell-border)] px-4 py-2.5 text-sm font-medium text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
+            >
+              仅退出账号，保留本地数据
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setLogoutChoiceOpen(false)}
+              className="w-full rounded-lg border border-[var(--shell-border)] px-4 py-2.5 text-sm font-medium text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null}
+    </>
   );
 }
