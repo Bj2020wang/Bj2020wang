@@ -37,6 +37,27 @@ function formatSyncShortTime(ts: number | null): string {
   })}`;
 }
 
+function readUpdatedAt(value: unknown): number | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = (value as { updatedAt?: unknown }).updatedAt;
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
+}
+
+function normalizeSnapshotForCompare(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const cloned = { ...(value as Record<string, unknown>) };
+  delete cloned.updatedAt;
+  return cloned;
+}
+
+function snapshotToComparableString(value: unknown): string {
+  try {
+    return JSON.stringify(normalizeSnapshotForCompare(value));
+  } catch {
+    return '';
+  }
+}
+
 interface AccountLoginModalProps {
   open: boolean;
   onClose: () => void;
@@ -148,6 +169,12 @@ export default function AccountLoginModal({
   const teamBaseVersionRef = useRef(teamBaseVersion);
   const pullSnapshotRef = useRef(pullSnapshot);
   pullSnapshotRef.current = pullSnapshot;
+  const pushSnapshotRef = useRef(pushSnapshot);
+  pushSnapshotRef.current = pushSnapshot;
+  const onPullSnapshotRef = useRef(onPullSnapshot);
+  onPullSnapshotRef.current = onPullSnapshot;
+  const onPushSnapshotRef = useRef(onPushSnapshot);
+  onPushSnapshotRef.current = onPushSnapshot;
 
   const isTeamOwner =
     !!accountEmail &&
@@ -405,73 +432,57 @@ export default function AccountLoginModal({
     };
   }, [open, businessToken, workspaceMode, activeTeamId, onTeamWorkspaceMeta]);
 
-  const readUpdatedAt = (value: unknown): number | null => {
-    if (!value || typeof value !== 'object') return null;
-    const raw = (value as { updatedAt?: unknown }).updatedAt;
-    return typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
-  };
-
   const formatTime = (ts: number | null): string => {
     if (!ts) return '未知';
     return new Date(ts).toLocaleString('zh-CN', { hour12: false });
   };
 
-  const normalizeSnapshotForCompare = (value: unknown): unknown => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-    const cloned = { ...(value as Record<string, unknown>) };
-    delete cloned.updatedAt;
-    return cloned;
-  };
+  const checkSyncStatus = useCallback(
+    async (
+      token: string
+    ): Promise<{
+      localUpdatedAt: number | null;
+      cloudUpdatedAt: number | null;
+      localHasChanges: boolean;
+      cloudHasNewerVersion: boolean;
+      cloudVersion: number;
+    }> => {
+      const localSnapshot = onPushSnapshotRef.current();
+      const localUpdatedAt = readUpdatedAt(localSnapshot);
+      const cloudRes = await pullSnapshotRef.current(token, { syncBaseVersion: false });
+      const cloudSnapshot = cloudRes.data?.snapshot;
+      const cloudUpdatedAt = typeof cloudRes.data?.updatedAt === 'number' ? cloudRes.data.updatedAt : null;
+      const cloudVersion = typeof cloudRes.data?.version === 'number' ? cloudRes.data.version : 0;
+      const cloudHasNewerVersion = cloudVersion > baseVersionRef.current;
+      const localComparable = snapshotToComparableString(localSnapshot);
+      const cloudComparable = snapshotToComparableString(cloudSnapshot);
+      const snapshotDifferent =
+        localComparable !== '' && cloudComparable !== '' && localComparable !== cloudComparable;
+      const localHasChanges =
+        snapshotDifferent || (!!localUpdatedAt && (!cloudUpdatedAt || localUpdatedAt > cloudUpdatedAt));
+      setHasPendingSync(localHasChanges && !cloudHasNewerVersion);
 
-  const toComparableString = (value: unknown): string => {
-    try {
-      return JSON.stringify(normalizeSnapshotForCompare(value));
-    } catch {
-      return '';
-    }
-  };
-
-  const checkSyncStatus = async (
-    token: string
-  ): Promise<{
-    localUpdatedAt: number | null;
-    cloudUpdatedAt: number | null;
-    localHasChanges: boolean;
-    cloudHasNewerVersion: boolean;
-    cloudVersion: number;
-  }> => {
-    const localSnapshot = onPushSnapshot();
-    const localUpdatedAt = readUpdatedAt(localSnapshot);
-    const cloudRes = await pullSnapshot(token, { syncBaseVersion: false });
-    const cloudSnapshot = cloudRes.data?.snapshot;
-    const cloudUpdatedAt = typeof cloudRes.data?.updatedAt === 'number' ? cloudRes.data.updatedAt : null;
-    const cloudVersion = typeof cloudRes.data?.version === 'number' ? cloudRes.data.version : 0;
-    const cloudHasNewerVersion = cloudVersion > baseVersion;
-    const localComparable = toComparableString(localSnapshot);
-    const cloudComparable = toComparableString(cloudSnapshot);
-    const snapshotDifferent = localComparable !== '' && cloudComparable !== '' && localComparable !== cloudComparable;
-    const localHasChanges = snapshotDifferent || (!!localUpdatedAt && (!cloudUpdatedAt || localUpdatedAt > cloudUpdatedAt));
-    setHasPendingSync(localHasChanges && !cloudHasNewerVersion);
-
-    if (!localUpdatedAt && !cloudUpdatedAt) {
-      setSyncStatus('暂无可比较的同步时间');
+      if (!localUpdatedAt && !cloudUpdatedAt) {
+        setSyncStatus('暂无可比较的同步时间');
+        return { localUpdatedAt, cloudUpdatedAt, localHasChanges, cloudHasNewerVersion, cloudVersion };
+      }
+      if (cloudHasNewerVersion) {
+        setSyncStatus('检测到云端有更新，建议先拉取云端');
+        return { localUpdatedAt, cloudUpdatedAt, localHasChanges, cloudHasNewerVersion, cloudVersion };
+      }
+      if (cloudUpdatedAt && (!localUpdatedAt || cloudUpdatedAt > localUpdatedAt)) {
+        setSyncStatus('检测到云端有更新，建议先拉取云端');
+        return { localUpdatedAt, cloudUpdatedAt, localHasChanges, cloudHasNewerVersion, cloudVersion };
+      }
+      if (localHasChanges) {
+        setSyncStatus('检测到本地有未推送更新，建议推送云端');
+        return { localUpdatedAt, cloudUpdatedAt, localHasChanges, cloudHasNewerVersion, cloudVersion };
+      }
+      setSyncStatus('本地与云端已同步');
       return { localUpdatedAt, cloudUpdatedAt, localHasChanges, cloudHasNewerVersion, cloudVersion };
-    }
-    if (cloudHasNewerVersion) {
-      setSyncStatus('检测到云端有更新，建议先拉取云端');
-      return { localUpdatedAt, cloudUpdatedAt, localHasChanges, cloudHasNewerVersion, cloudVersion };
-    }
-    if (cloudUpdatedAt && (!localUpdatedAt || cloudUpdatedAt > localUpdatedAt)) {
-      setSyncStatus('检测到云端有更新，建议先拉取云端');
-      return { localUpdatedAt, cloudUpdatedAt, localHasChanges, cloudHasNewerVersion, cloudVersion };
-    }
-    if (localHasChanges) {
-      setSyncStatus('检测到本地有未推送更新，建议推送云端');
-      return { localUpdatedAt, cloudUpdatedAt, localHasChanges, cloudHasNewerVersion, cloudVersion };
-    }
-    setSyncStatus('本地与云端已同步');
-    return { localUpdatedAt, cloudUpdatedAt, localHasChanges, cloudHasNewerVersion, cloudVersion };
-  };
+    },
+    []
+  );
 
   const applyTeamCloudPullMerge = useCallback(
     (teamId: string, res: Awaited<ReturnType<typeof authApi.teamPull>>) => {
@@ -500,15 +511,15 @@ export default function AccountLoginModal({
       cloudVersion: number;
       pullRes: Awaited<ReturnType<typeof authApi.teamPull>>;
     }> => {
-      const localSnapshot = onPushSnapshot();
+      const localSnapshot = onPushSnapshotRef.current();
       const localUpdatedAt = readUpdatedAt(localSnapshot);
       const pullRes = await authApi.teamPull(token, teamId);
       const cloudSnapshot = pullRes.data?.snapshot;
       const cloudUpdatedAt = typeof pullRes.data?.updatedAt === 'number' ? pullRes.data.updatedAt : null;
       const cloudVersion = typeof pullRes.data?.version === 'number' ? pullRes.data.version : 0;
       const cloudHasNewerVersion = cloudVersion > teamBaseVersionRef.current;
-      const localComparable = toComparableString(localSnapshot);
-      const cloudComparable = toComparableString(cloudSnapshot);
+      const localComparable = snapshotToComparableString(localSnapshot);
+      const cloudComparable = snapshotToComparableString(cloudSnapshot);
       const snapshotDifferent =
         localComparable !== '' && cloudComparable !== '' && localComparable !== cloudComparable;
       const localHasChanges =
@@ -537,7 +548,7 @@ export default function AccountLoginModal({
         pullRes,
       };
     },
-    [onPushSnapshot]
+    []
   );
 
   useEffect(() => {
@@ -572,14 +583,14 @@ export default function AccountLoginModal({
         }
 
         if (summary.cloudHasNewerVersion && summary.localHasChanges) {
-          const pullRes = await pullSnapshot(businessToken);
-          onPullSnapshot(pullRes.data?.snapshot ?? null);
+          const pullRes = await pullSnapshotRef.current(businessToken);
+          onPullSnapshotRef.current(pullRes.data?.snapshot ?? null);
           const pulledAt = Date.now();
           setLastPullAt(pulledAt);
           window.localStorage.setItem(ACCOUNT_LAST_PULL_AT_KEY, String(pulledAt));
 
-          const mergedSnapshot = onPushSnapshot();
-          await pushSnapshot(businessToken, mergedSnapshot);
+          const mergedSnapshot = onPushSnapshotRef.current();
+          await pushSnapshotRef.current(businessToken, mergedSnapshot);
           const pushedAt = Date.now();
           lastAutoPushAtRef.current = pushedAt;
           lastSyncActionAtRef.current = pushedAt;
@@ -594,8 +605,8 @@ export default function AccountLoginModal({
         }
 
         if (summary.cloudHasNewerVersion) {
-          const pullRes = await pullSnapshot(businessToken);
-          onPullSnapshot(pullRes.data?.snapshot ?? null);
+          const pullRes = await pullSnapshotRef.current(businessToken);
+          onPullSnapshotRef.current(pullRes.data?.snapshot ?? null);
           const pulledAt = Date.now();
           lastSyncActionAtRef.current = pulledAt;
           setLastPullAt(pulledAt);
@@ -607,8 +618,8 @@ export default function AccountLoginModal({
         }
 
         if (summary.localHasChanges) {
-          const localSnapshot = onPushSnapshot();
-          await pushSnapshot(businessToken, localSnapshot);
+          const localSnapshot = onPushSnapshotRef.current();
+          await pushSnapshotRef.current(businessToken, localSnapshot);
           const pushedAt = Date.now();
           lastAutoPushAtRef.current = pushedAt;
           lastSyncActionAtRef.current = pushedAt;
@@ -642,7 +653,16 @@ export default function AccountLoginModal({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [activeTeamId, autoPushEnabled, baseVersion, businessToken, busy, hasPulledOnce, reportRuntime, workspaceMode]);
+  }, [
+    activeTeamId,
+    autoPushEnabled,
+    businessToken,
+    busy,
+    checkSyncStatus,
+    hasPulledOnce,
+    reportRuntime,
+    workspaceMode,
+  ]);
 
   /** 协作云：与个人云同参数的空闲自动双向（每 60s 检查；空闲 30s + 最短间隔 60s + 冷却 15s 才执行） */
   useEffect(() => {
@@ -697,7 +717,7 @@ export default function AccountLoginModal({
             return;
           }
 
-          const mergedSnapshot = onPushSnapshot();
+          const mergedSnapshot = onPushSnapshotRef.current();
           try {
             const pushRes = await authApi.teamPush(businessToken, tid, mergedSnapshot, {
               baseVersion: pullVer,
@@ -736,7 +756,7 @@ export default function AccountLoginModal({
         }
 
         if (summary.localHasChanges && !teamPushForbidden) {
-          const localSnapshot = onPushSnapshot();
+          const localSnapshot = onPushSnapshotRef.current();
           try {
             const pushRes = await authApi.teamPush(businessToken, tid, localSnapshot, {
               baseVersion: teamBaseVersionRef.current,
@@ -793,7 +813,6 @@ export default function AccountLoginModal({
     checkCollaborationSyncStatus,
     deviceId,
     onTeamPushedVersion,
-    onPushSnapshot,
     reportRuntime,
     teamAutoBidirEnabled,
     teamPushForbidden,
