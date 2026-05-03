@@ -4,6 +4,7 @@ import TodoSidebar from '@/components/TodoSidebar';
 import CalendarGrid from '@/components/CalendarGrid';
 import WeekView from '@/components/WeekView';
 import DayView from '@/components/DayView';
+import YearView from '@/components/YearView';
 import GlobalSearchPanel from '@/features/search/GlobalSearchPanel';
 import AccountLoginModal from '@/features/account/AccountLoginModal';
 import { useSharedAccountAuth } from '@/features/account/useSharedAccountAuth';
@@ -107,7 +108,7 @@ function isPersistedDataLike(value: unknown): value is PersistedData {
   const data = value as Partial<PersistedData>;
   if (!Array.isArray(data.todos) || !Array.isArray(data.events)) return false;
   if (typeof data.currentDate !== 'string') return false;
-  if (!data.viewType || !['today', 'week', 'month'].includes(data.viewType)) return false;
+  if (!data.viewType || !['today', 'week', 'month', 'year'].includes(data.viewType)) return false;
   if (!data.notesByDate || typeof data.notesByDate !== 'object') return false;
   return true;
 }
@@ -148,7 +149,7 @@ const loadPersistedData = (): PersistedData | null => {
     const parsed = JSON.parse(raw) as PersistedData;
     if (!Array.isArray(parsed.todos) || !Array.isArray(parsed.events)) return null;
     if (typeof parsed.currentDate !== 'string') return null;
-    if (!parsed.viewType || !['today', 'week', 'month'].includes(parsed.viewType)) return null;
+    if (!parsed.viewType || !['today', 'week', 'month', 'year'].includes(parsed.viewType)) return null;
     if (parsed.notesByDate && typeof parsed.notesByDate !== 'object') return null;
     return parsed;
   } catch {
@@ -589,7 +590,29 @@ export default function App() {
     persisted?.noteTombstonesByDate ?? {}
   );
   const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const [showYearPicker, setShowYearPicker] = useState(false);
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
+  const showGlobalSearchRef = useRef(false);
+  useEffect(() => {
+    showGlobalSearchRef.current = showGlobalSearch;
+  }, [showGlobalSearch]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowGlobalSearch(true);
+        return;
+      }
+      if (e.key === 'Escape' && showGlobalSearchRef.current) {
+        e.preventDefault();
+        setShowGlobalSearch(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, []);
+
   const [showAccountLogin, setShowAccountLogin] = useState(false);
   const [accountSyncRuntime, setAccountSyncRuntime] = useState<string>('未登录');
   const [todoMergeHint, setTodoMergeHint] = useState('');
@@ -770,6 +793,8 @@ export default function App() {
       d.setMonth(d.getMonth() - 1);
     } else if (viewType === 'week') {
       d.setDate(d.getDate() - 7);
+    } else if (viewType === 'year') {
+      d.setFullYear(d.getFullYear() - 1);
     } else {
       d.setDate(d.getDate() - 1);
     }
@@ -782,6 +807,8 @@ export default function App() {
       d.setMonth(d.getMonth() + 1);
     } else if (viewType === 'week') {
       d.setDate(d.getDate() + 7);
+    } else if (viewType === 'year') {
+      d.setFullYear(d.getFullYear() + 1);
     } else {
       d.setDate(d.getDate() + 1);
     }
@@ -789,6 +816,8 @@ export default function App() {
   };
 
   const handleToday = () => {
+    setShowMonthPicker(false);
+    setShowYearPicker(false);
     setCurrentDate(new Date());
     setViewType('today');
   };
@@ -985,6 +1014,15 @@ export default function App() {
     setShowMonthPicker(false);
   };
 
+  const handleYearSelect = (selectedYear: number) => {
+    const d = new Date(currentDate);
+    d.setFullYear(selectedYear);
+    const dim = new Date(selectedYear, d.getMonth() + 1, 0).getDate();
+    if (d.getDate() > dim) d.setDate(dim);
+    setCurrentDate(d);
+    setShowYearPicker(false);
+  };
+
   const handleDayCellClick = useCallback((dateStr: string) => {
     const [y, m, d] = dateStr.split('-').map(Number);
     setCurrentDate(new Date(y, m - 1, d));
@@ -1141,7 +1179,11 @@ export default function App() {
       const content = await file.text();
       const parsed = JSON.parse(content) as PersistedData;
 
-      const validViewType = parsed.viewType === 'today' || parsed.viewType === 'week' || parsed.viewType === 'month';
+      const validViewType =
+        parsed.viewType === 'today' ||
+        parsed.viewType === 'week' ||
+        parsed.viewType === 'month' ||
+        parsed.viewType === 'year';
       const validDate = typeof parsed.currentDate === 'string' && !Number.isNaN(new Date(parsed.currentDate).getTime());
       const validTodos = Array.isArray(parsed.todos);
       const validEvents = Array.isArray(parsed.events);
@@ -1280,11 +1322,15 @@ export default function App() {
       const end = weekDays[6];
       return `${start.fullDate.slice(0, 4)}年${start.fullDate.slice(5, 7)}月${start.date}日 - ${end.fullDate.slice(5, 7)}月${end.date}日`;
     }
+    if (viewType === 'year') {
+      return `${year}年`;
+    }
     return `${year}年${month}月`;
   })();
 
-  // Month picker only for month view
+  // Month / year picker only for corresponding view
   const showMonthDropdown = viewType === 'month';
+  const showYearDropdown = viewType === 'year';
 
   // Days for month view
   const days = getMonthDays(year, month);
@@ -1310,6 +1356,10 @@ export default function App() {
       if (viewType === 'week') {
         const weekDays = getWeekDays(new Date(currentDate));
         return { start: weekDays[0].fullDate, end: weekDays[6].fullDate };
+      }
+
+      if (viewType === 'year') {
+        return { start: `${year}-01-01`, end: `${year}-12-31` };
       }
 
       const monthStart = toDateKey(new Date(year, month - 1, 1));
@@ -1339,7 +1389,7 @@ export default function App() {
           const weekEnd = addDays(weekStart, 6);
           return isInRange(weekStart, weekEnd, start, end);
         }
-        // month scope todos only show in month list.
+        // month scope todos：仅在月视图按当月筛选；年视图侧栏不展开无年份的「月桶」任务（避免全年误列）
         return viewType === 'month' && todo.month === month;
       })();
 
@@ -1718,7 +1768,23 @@ export default function App() {
           <div className="relative">
             {showMonthDropdown ? (
               <button
-                onClick={() => setShowMonthPicker(!showMonthPicker)}
+                type="button"
+                onClick={() => {
+                  setShowMonthPicker(!showMonthPicker);
+                  setShowYearPicker(false);
+                }}
+                className="flex items-center gap-1 text-xl font-semibold text-[var(--shell-text-strong)] hover:text-[var(--shell-accent)] transition-colors"
+              >
+                {headerLabel}
+                <ChevronDown className="w-4 h-4" />
+              </button>
+            ) : showYearDropdown ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowYearPicker(!showYearPicker);
+                  setShowMonthPicker(false);
+                }}
                 className="flex items-center gap-1 text-xl font-semibold text-[var(--shell-text-strong)] hover:text-[var(--shell-accent)] transition-colors"
               >
                 {headerLabel}
@@ -1734,6 +1800,7 @@ export default function App() {
                   {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
                     <button
                       key={m}
+                      type="button"
                       onClick={() => handleMonthSelect(m)}
                       className={`
                         px-3 py-2 rounded-lg text-sm font-medium transition-colors
@@ -1744,6 +1811,29 @@ export default function App() {
                       `}
                     >
                       {m}月
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {showYearPicker && showYearDropdown && (
+              <div className="absolute top-full left-0 mt-2 bg-[var(--shell-panel)] border border-[var(--shell-border-subtle)] rounded-xl shadow-xl z-50 p-3 w-72 max-h-72 overflow-y-auto">
+                <div className="text-sm font-medium text-[var(--shell-text-muted)] mb-2">选择年份</div>
+                <div className="grid grid-cols-3 gap-2">
+                  {Array.from({ length: 24 }, (_, i) => year - 10 + i).map((yOpt) => (
+                    <button
+                      key={yOpt}
+                      type="button"
+                      onClick={() => handleYearSelect(yOpt)}
+                      className={`
+                        px-3 py-2 rounded-lg text-sm font-medium transition-colors
+                        ${yOpt === year
+                          ? 'bg-[var(--shell-accent)] text-[var(--shell-accent-contrast)]'
+                          : 'text-[var(--shell-text-strong)] hover:bg-[var(--shell-surface-hover)]'
+                        }
+                      `}
+                    >
+                      {yOpt}
                     </button>
                   ))}
                 </div>
@@ -1763,9 +1853,10 @@ export default function App() {
             {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
           <button
+            type="button"
             onClick={() => setShowGlobalSearch(true)}
             className="px-3 py-2 rounded-lg text-sm font-medium border border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] transition-colors duration-200 flex items-center gap-1"
-            title="全局关键词搜索"
+            title="全局搜索（Ctrl+K / ⌘K）"
           >
             <Search className="w-4 h-4" />
             搜索
@@ -1780,6 +1871,7 @@ export default function App() {
           {eventMergeHint ? <span className="text-xs text-[var(--shell-accent)]">{eventMergeHint}</span> : null}
           {noteMergeHint ? <span className="text-xs text-[var(--shell-accent)]">{noteMergeHint}</span> : null}
           <button
+            type="button"
             onClick={handleToday}
             className={`
               px-4 py-2 rounded-lg text-sm font-medium border transition-colors duration-200
@@ -1792,7 +1884,12 @@ export default function App() {
             Today
           </button>
           <button
-            onClick={() => setViewType('week')}
+            type="button"
+            onClick={() => {
+              setShowMonthPicker(false);
+              setShowYearPicker(false);
+              setViewType('week');
+            }}
             className={`
               px-4 py-2 rounded-lg text-sm font-medium border transition-colors duration-200
               ${viewType === 'week'
@@ -1804,7 +1901,12 @@ export default function App() {
             Week
           </button>
           <button
-            onClick={() => setViewType('month')}
+            type="button"
+            onClick={() => {
+              setShowMonthPicker(false);
+              setShowYearPicker(false);
+              setViewType('month');
+            }}
             className={`
               px-4 py-2 rounded-lg text-sm font-medium border transition-colors duration-200
               ${viewType === 'month'
@@ -1814,6 +1916,23 @@ export default function App() {
             `}
           >
             Month
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setShowMonthPicker(false);
+              setShowYearPicker(false);
+              setViewType('year');
+            }}
+            className={`
+              px-4 py-2 rounded-lg text-sm font-medium border transition-colors duration-200
+              ${viewType === 'year'
+                ? 'border-[var(--shell-accent)] text-[var(--shell-accent)] bg-transparent'
+                : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
+              }
+            `}
+          >
+            Year
           </button>
         </div>
       </header>
@@ -1919,19 +2038,41 @@ export default function App() {
             teamOwnerEmail={teamOwnerEmail}
           />
         )}
+
+        {viewType === 'year' && (
+          <YearView
+            year={year}
+            events={events}
+            onPickMonth={(m) => {
+              setCurrentDate(new Date(year, m - 1, 1));
+              setViewType('month');
+              setShowYearPicker(false);
+              setShowMonthPicker(false);
+            }}
+          />
+        )}
       </div>
 
-      {/* Click outside to close month picker */}
-      {showMonthPicker && (
+      {/* Click outside to close month / year picker */}
+      {(showMonthPicker || showYearPicker) && (
         <div
           className="fixed inset-0 z-40"
-          onClick={() => setShowMonthPicker(false)}
+          onClick={() => {
+            setShowMonthPicker(false);
+            setShowYearPicker(false);
+          }}
         />
       )}
 
       {showGlobalSearch && (
         <GlobalSearchPanel
           events={events}
+          todos={todos}
+          notesByDate={notesByDate}
+          workspaceMode={workspaceMode}
+          accountEmail={accountEmail}
+          teamOwnerEmail={teamOwnerEmail}
+          noteOwnerByDate={noteOwnerByDate}
           onClose={() => setShowGlobalSearch(false)}
           onJumpToDate={handleSearchJumpToDate}
           onAddToTodayPlan={handleAddSearchResultToTodayPlan}

@@ -32,7 +32,7 @@ export interface CalendarEvent {
   collabOwnerEmail?: string;
 }
 
-export type ViewType = 'today' | 'week' | 'month';
+export type ViewType = 'today' | 'week' | 'month' | 'year';
 
 export interface DayInfo {
   date: number;

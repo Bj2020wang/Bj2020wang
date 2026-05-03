@@ -9,6 +9,8 @@ export default defineConfig({
   plugins: [inspectAttr(), react()],
   server: {
     port: 3000,
+    /** 手机等同 Wi‑Fi 设备用 http://<本机局域网IP>:3000 访问 */
+    host: true,
   },
   resolve: {
     alias: {

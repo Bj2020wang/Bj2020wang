@@ -1,8 +1,8 @@
-# 项目说明与功能入口（v0.2.3）
+# 项目说明与功能入口（v0.2.4）
 
 这份文档给你做长期参考：帮助你快速知道“哪个文件负责什么、功能入口在哪、以后怎么加功能不混乱”。
 
-> **版本**：应用与安装包以 **`src-tauri/tauri.conf.json` 的 `version`** 为准（当前 **0.2.3**），并与 Git 标签 **`v0.2.3`** 对齐；详见 CHANGELOG 与 `.cursorrules` 发布约定。
+> **版本**：应用与安装包以 **`src-tauri/tauri.conf.json` 的 `version`** 为准（当前 **0.2.4**），并与 Git 标签 **`v0.2.4`** 对齐；详见 CHANGELOG 与 `.cursorrules` 发布约定。
 
 ## 1. 目录与文件职责（关键）
 
@@ -42,6 +42,12 @@
 - `src/components/DayView.tsx`  
   日历视图（时间轴、无明确时间任务区、事件拖拽改时间）。
 
+- `src/components/YearView.tsx`  
+  年度视图：按自然月汇总与日程区间相交的任务数 / 完成数；点击月份由 `App.tsx` 切换到 **Month** 并定位该月。
+
+- `src/features/search/GlobalSearchPanel.tsx`  
+  顶栏「搜索」弹层：任务 / 日程 / 笔记检索；协作模式下 **含队友 / 只看我的**；快捷键、笔记高亮、按周 / 月 / 年范围筛选。
+
 - `src/lib/calendar-utils.ts`  
   日历工具函数：月天数、周天数、节假日、农历、事件分配。
 
@@ -65,11 +71,12 @@
   - `handleDeleteTodo(...)`
   - `getFilteredTodos()`
 
-### 2.2 日历规划（拖拽到月/周/日）
+### 2.2 日历规划（拖拽到月/周/日/年）
 - 视图文件：
   - 月历：`CalendarGrid.tsx`
   - 周历：`WeekView.tsx`
   - 日历：`DayView.tsx`
+  - 年度：`YearView.tsx`（仅汇总展示，拖拽规划仍在月 / 周 / 日）
 - 核心处理在 `App.tsx`：
   - `handleDrop(...)`
   - `handleMoveEvent(...)`
@@ -131,6 +138,20 @@
 - **入口**：主界面顶栏「搜索」按钮左侧，太阳 / 月亮图标按钮；深色模式下显示太阳（点击切换到浅色），浅色模式下显示月亮（切回深色）。
 - **实现**：`src/features/theme/useAppTheme.ts` 读写 `localStorage`；`src/index.css` 中 `:root` 为深色壳层变量，`html.theme-light` 为浅色暖底 + 橙点缀（`--shell-*`）。主布局、侧栏、月/周/日视图、账号弹窗、全局搜索等已统一使用这些变量。
 - **说明**：任务/事件的分类颜色仍为数据字段中的颜色，不受主题切换覆盖。
+
+### 2.9 年度视图与顶栏切换
+- **入口**：顶栏 **Year**（与 Day / Week / Month 并列）；标题区为 **`YYYY年`** + 年份下拉，左右箭头按 **年** 切换。
+- **数据范围**：`App.tsx` 中 `getViewRange` / `getFilteredTodos` 在 `viewType === 'year'` 时为全年区间；侧栏对「仅挂在日期、未入日历桶」的任务在年视图下默认不展开纯月桶列表（与注释约定一致）。
+- **持久化**：导入导出与本地状态中 `viewType` 含 **`year`**（见 `types` 与校验逻辑）。
+
+### 2.10 全局搜索
+- **入口**：顶栏「搜索」；快捷键由 `GlobalSearchPanel` 与 `App.tsx` 挂载逻辑约定。
+- **协作**：非个人视图时可切换 **含队友 / 只看我的**，与 `noteOwnerByDate`、事件 / 任务归属字段联动。
+- **扩展**：新检索字段或筛选项优先改 `GlobalSearchPanel.tsx`，必要时由 `App.tsx` 传入额外 props。
+
+### 2.11 本地开发（含局域网）
+- **常用**：根目录 `npm run dev`（Vite）。
+- **局域网**：`vite.config.ts` 已设 `server.host: true`，终端会打印 **Network** URL，手机等同网设备可访问（需防火墙放行端口）。
 
 
 ## 3. 典型调用链（便于理解）

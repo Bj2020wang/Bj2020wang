@@ -123,6 +123,9 @@ export default function TodoSidebar({
 
   // Get subtitle based on view
   const getSubtitle = (): string => {
+    if (viewType === 'year') {
+      return `${currentDate.getFullYear()}年待办（与日程落在该年的任务）`;
+    }
     if (viewType === 'month') {
       return `${currentDate.getMonth() + 1}月待办`;
     }
@@ -141,6 +144,7 @@ export default function TodoSidebar({
   };
 
   const getEmptyText = (): string => {
+    if (viewType === 'year') return `${currentDate.getFullYear()}年暂无匹配的待办任务`;
     if (viewType === 'month') return `${currentDate.getMonth() + 1}月暂无待办任务`;
     if (viewType === 'week') return '本周暂无待办任务';
     return '今日暂无待办任务';

@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.4
+
+- **年度视图**：顶栏在 Month 旁增加 **Year**，`ViewType` 含 `'year'`（`src/types/index.ts`）；`YearView.tsx` 按自然月汇总与日历区间相交的日程数与完成数，点击某月切换到当月 **Month** 视图（`App.tsx` 联动年份下拉与按年翻页）。
+- **全局搜索增强**：`GlobalSearchPanel.tsx` 支持任务 / 日程 / 笔记统一检索；协作模式下可按 **含队友 / 只看我的** 过滤；快捷键打开面板；笔记片段高亮；可按周 / 月 / 年滚动筛选（列表平铺展示）。
+- **开发体验**：`vite.config.ts` 中 `server.host: true`，便于局域网设备访问终端输出的 Network 地址调试前端。
+- **侧栏文案**：年视图下 `TodoSidebar` 副标题与空列表提示与月 / 周 / 日区分。
+- **版本对齐**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`app` 包）均为 **0.2.4**；发布安装包与 Git 标签请使用 **`v0.2.4`**（见 `.cursorrules`）。
+
 ## v0.2.3
 
 - **前端质量门禁**：`npm run lint` 无 error；修复 `react-hooks/set-state-in-effect`（`App.tsx`、`TodoSidebar.tsx` 中对需在 effect 内更新的状态使用 `queueMicrotask`，语义基本不变）。
