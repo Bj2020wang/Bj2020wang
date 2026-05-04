@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { BookOpen, Briefcase, Dumbbell, Globe, Heart, Search, X } from 'lucide-react';
+import { BookOpen, Briefcase, Dumbbell, Heart, Search, X } from 'lucide-react';
 import type { CalendarEvent, TodoCategory, TodoItem } from '@/types';
 import { isPeerEventInTeam, isPeerTodoInTeam, normCollabEmail } from '@/lib/teamCollab';
 
@@ -745,24 +745,7 @@ export default function GlobalSearchPanel({
           </button>
         </div>
 
-        <p
-          className="hidden shrink-0 px-5 text-[11px] leading-relaxed text-[var(--shell-subtle)] sm:block"
-          title="快捷键与搜索范围"
-        >
-          Ctrl+K / ⌘K 打开 · Esc 关闭 · 结果点击跳转日历。完成筛选仅作用于日程与任务。
-          {showCollabSearchFilters ? ' 协作区可筛选只看我的/含队友。' : ''}
-        </p>
-        <p className="shrink-0 px-5 text-[11px] text-[var(--shell-subtle)] sm:hidden">Esc 关闭 · 点击结果跳转日历</p>
-
-        <div className="mx-5 mt-3 flex shrink-0 items-center justify-between gap-3 rounded-2xl border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)] px-4 py-3">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <Globe className="h-5 w-5 shrink-0 text-[var(--shell-accent)]" strokeWidth={2} aria-hidden />
-            <span className="truncate text-sm font-medium text-[var(--shell-text-strong)]">全局搜索</span>
-          </div>
-          <span className="shrink-0 text-xs text-[var(--shell-text-muted)]">{searchContextLabel}</span>
-        </div>
-
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className={filterScrollClass}>
           <div className="relative">
             <Search

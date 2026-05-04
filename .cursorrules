@@ -22,6 +22,12 @@
    - 命令：`powershell -ExecutionPolicy Bypass -File .\scripts\release.ps1`
    - 作用：校验工作区干净、校验标签一致、打包 EXE、归档到 `release/v版本号/`。
 
+2b. Windows 本地手动执行 `tauri build` 时，须与 `scripts\release.ps1` 使用同一套 Cargo 输出约定（写入 `PROJECT_GUIDE.md` §2.7）：
+   - `CARGO_TARGET_DIR` = `C:\tbuild\app`（可先 `New-Item -ItemType Directory -Force C:\tbuild\app`）
+   - `CARGO_BUILD_JOBS` = `1`
+   - `RUSTFLAGS` = `-C debuginfo=0`
+   - 安装包路径：`C:\tbuild\app\release\bundle\nsis\Todo Calendar_<version>_x64-setup.exe`
+
 3. 发布包归档规则：
    - 安装包固定放在 `release/vX.Y.Z/` 目录下，便于回溯和分发。
 

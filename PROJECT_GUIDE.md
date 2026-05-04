@@ -128,12 +128,19 @@
 
 ### 2.7 EXE 打包入口（个人使用与分发）
 - 配置：`src-tauri/tauri.conf.json`（`productName`、`version`、图标、`beforeBuildCommand` 等）。
-- **仅打安装包（常用）**：在项目根目录执行 `npx tauri build -b nsis`。会先跑 `npm run build`（前端进 `dist/`），再编译 Rust 并调用 NSIS。安装包文件名形如：`Todo Calendar_<version>_x64-setup.exe`。
-- **绿色版 exe**：同次构建还会在 Cargo 输出目录的 `release\app.exe`（具体路径见下条 `CARGO_TARGET_DIR`）。分发给别人时更推荐安装包，依赖更完整。
-- **链接失败 `LNK1105` / 错误代码 `1224`**（无法关闭临时目录下的 exe）：多为杀毒/索引或工具链占用临时目录。可在 PowerShell 中指定固定产物目录后再构建，例如：
-  - `$env:CARGO_TARGET_DIR = "C:\Users\<你的用户名>\tauri-cargo-target\app"`
-  - `npx tauri build -b nsis`
-  仓库内 `scripts\release.ps1` 已使用该思路（并设 `CARGO_BUILD_JOBS=1` 等）；个人日常打包可直接照抄这两行环境变量。
+- **Windows 产物目录约定（强制与发布脚本一致）**：编译缓存与 `release` 输出统一使用固定短路径 **`C:\tbuild\app`**（通过环境变量 `CARGO_TARGET_DIR`），避免默认 `src-tauri\target` 或临时目录在杀毒/同步环境下触发链接器 **`LNK1105` / `1224`**。安装包与绿色版 exe 的路径均以该目录为准，而非项目下的 `target`。
+- **手动打包（PowerShell，与 `scripts\release.ps1` 对齐）**：在项目根目录执行前先确保目录存在，并设置下列变量再调用 Tauri：
+  ```powershell
+  New-Item -ItemType Directory -Force -Path "C:\tbuild\app" | Out-Null
+  $env:CARGO_TARGET_DIR = "C:\tbuild\app"
+  $env:CARGO_BUILD_JOBS = "1"
+  $env:RUSTFLAGS = "-C debuginfo=0"
+  npx tauri build -b nsis
+  ```
+  - **安装包**：`C:\tbuild\app\release\bundle\nsis\Todo Calendar_<version>_x64-setup.exe`
+  - **绿色版**：`C:\tbuild\app\release\app.exe`
+- **仅一句命令（不推荐在未排除杀毒时直接使用）**：若未设置 `CARGO_TARGET_DIR`，可在项目根执行 `npx tauri build -b nsis`（仍会先跑 `npm run build`）。此时产物在 `src-tauri\target\...`，容易在个人电脑上再次踩链接占用问题。
+- **链接仍失败时的排查**：暂停第三方杀毒与桌面同步、为 `C:\tbuild\app` 与项目目录添加 Windows Defender 排除、改用系统自带 PowerShell（非 IDE 内嵌终端）重试；详见上条环境变量组合。
 - **归档位置**：可将生成的 `*_x64-setup.exe` 复制到仓库 `release\v<版本号>\`，与历史版本并列，便于自己或他人下载安装。
 - **正式发布**：仍需遵守 `.cursorrules`：EXE 版本号与 Git 标签一致时，用 `scripts\release.ps1`（干净工作区 + 标签校验 + 构建 + 复制到 `release/`）。
 - 已处理的拖拽兼容配置：`dragDropEnabled: false`。

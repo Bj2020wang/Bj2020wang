@@ -23,7 +23,7 @@
 - **同步健壮性**：`AccountLoginModal` 个人云定时同步与协作空闲双向路径对 `pullSnapshot` / `pushSnapshot` / `onPullSnapshot` / `onPushSnapshot` 使用 ref；`checkSyncStatus` 结合 `baseVersionRef` 与稳定 `useCallback`；快照比对辅助函数提升至模块级——降低定时同步读到过期闭包、版本判断不准等偶现问题概率。
 - **协作删笔记**：协作区删除本人笔记时保留归属（`App.tsx`），避免切回个人云时删除墓碑无法合并导致旧笔记复活（见较早提交说明）。
 - **依赖审计**：温和 `npm audit fix` 后剩余告警集中于 `@cloudbase/node-sdk` 传递链；不建议未经回归使用 `npm audit fix --force`。
-- **已知限制**：部分 Windows 环境下 `cargo clippy`/链接仍可能出现 `LNK1105`/`1224`，需在构建机配置 Defender 排除、`CARGO_BUILD_JOBS=1` 或独立 `CARGO_TARGET_DIR` 等后再纳入发布门禁。
+- **已知限制**：部分 Windows 环境下 `cargo clippy`/链接仍可能出现 `LNK1105`/`1224`；仓库约定将 **`CARGO_TARGET_DIR` 设为 `C:\tbuild\app`**（与 `scripts\release.ps1` 一致），并配合 `CARGO_BUILD_JOBS=1`、必要时的 Defender 排除后再纳入发布门禁。
 - **版本对齐**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`app` 包）均为 **0.2.3**；发布安装包与 Git 标签请使用 **`v0.2.3`**（见 `.cursorrules`）。
 
 ## v0.2.2
@@ -53,7 +53,7 @@
 
 - **版本对齐**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 与 Git 标签 **`v0.1.6`** 一致；Windows 安装包文件名为 `Todo Calendar_0.1.6_x64-setup.exe`，归档目录 `release/v0.1.6/`。
 - 界面：深浅主题切换（默认深色；浅色为暖灰底 + 爱马仕橙点缀）。顶栏「搜索」左侧太阳/月亮按钮切换；偏好保存在浏览器 `localStorage` 键 `todo-calendar-theme`（桌面 EXE 同样生效）。实现见 `src/index.css` 的 `--shell-*` 变量与 `src/features/theme/useAppTheme.ts`。
-- Windows 个人打包：`npx tauri build -b nsis` 生成 NSIS 安装包 `Todo Calendar_<tauri.conf 版本>_x64-setup.exe`。若链接报错 `LNK1105` / `1224`，可将 `CARGO_TARGET_DIR` 指到本机固定目录（如 `C:\Users\<用户名>\tauri-cargo-target\app`）后再构建；`scripts\release.ps1` 已采用该约定。产物默认在 `%CARGO_TARGET_DIR%\release\bundle\nsis\`，可拷贝到仓库 `release\v<版本号>\` 便于留存分发。详见 `PROJECT_GUIDE.md` §2.7～§2.8。
+- Windows 个人打包：`npx tauri build -b nsis` 生成 NSIS 安装包 `Todo Calendar_<tauri.conf 版本>_x64-setup.exe`。若链接报错 `LNK1105` / `1224`，须将 **`CARGO_TARGET_DIR` 固定为 `C:\tbuild\app`**（并建议 `CARGO_BUILD_JOBS=1`，与 `scripts\release.ps1` 一致）后再构建；产物在 **`C:\tbuild\app\release\bundle\nsis\`**，可拷贝到仓库 `release\v<版本号>\` 便于留存分发。详见 `PROJECT_GUIDE.md` §2.7～§2.8。
 - 同步收口：顶栏状态改为「已登录 · 拉/推 时间 ·（可选）轮询兜底」；`[sync-debug]` 日志默认关闭，仅在 `.env` 设置 `VITE_SYNC_DEBUG=true` 时输出，且同类告警约 30s 节流。
 
 ## v0.1.5

@@ -57,11 +57,19 @@ npm run dev
 
 ## 桌面打包
 
-```bash
+Windows 上与仓库 **`scripts/release.ps1`** 保持一致时，请使用固定产物目录 **`C:\tbuild\app`**（降低链接器 `LNK1105`/`1224` 概率）。在项目根目录的 PowerShell 中：
+
+```powershell
+New-Item -ItemType Directory -Force -Path "C:\tbuild\app" | Out-Null
+$env:CARGO_TARGET_DIR = "C:\tbuild\app"
+$env:CARGO_BUILD_JOBS = "1"
+$env:RUSTFLAGS = "-C debuginfo=0"
 npx tauri build -b nsis
 ```
 
-正式发布与 Git 标签对齐见 `.cursorrules` 与 `scripts/release.ps1`。
+安装包默认在 `C:\tbuild\app\release\bundle\nsis\`。正式发布请执行 `powershell -ExecutionPolicy Bypass -File .\scripts\release.ps1`，并与 `.cursorrules` 中的 Git 标签约定对齐。
+
+未设置 `CARGO_TARGET_DIR` 时也可直接 `npx tauri build -b nsis`（产物落在 `src-tauri/target`），但在部分环境下更易触发链接失败。
 
 ---
 
