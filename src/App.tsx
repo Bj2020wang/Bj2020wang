@@ -1,11 +1,21 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, ChevronDown, Search, Sun, Moon, CalendarDays } from 'lucide-react';
+import {
+  BarChart3,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  Search,
+  Sun,
+  Moon,
+  CalendarDays,
+} from 'lucide-react';
 import TodoSidebar from '@/components/TodoSidebar';
 import CalendarGrid from '@/components/CalendarGrid';
 import WeekView from '@/components/WeekView';
 import DayView from '@/components/DayView';
 import YearView from '@/components/YearView';
 import GlobalSearchPanel from '@/features/search/GlobalSearchPanel';
+import StatisticsOverviewPanel from '@/features/stats/StatisticsOverviewPanel';
 import AccountLoginModal from '@/features/account/AccountLoginModal';
 import { useSharedAccountAuth } from '@/features/account/useSharedAccountAuth';
 import * as authApi from '@/features/account/authApi';
@@ -668,21 +678,24 @@ export default function App() {
   const [jumpCalendarDate, setJumpCalendarDate] = useState<Date>(() => new Date());
   const [jumpCalendarMonth, setJumpCalendarMonth] = useState<Date>(() => new Date());
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
-  const showGlobalSearchRef = useRef(false);
+  const [showStatisticsOverview, setShowStatisticsOverview] = useState(false);
+  const sidebarOverlayOpenRef = useRef(false);
   useEffect(() => {
-    showGlobalSearchRef.current = showGlobalSearch;
-  }, [showGlobalSearch]);
+    sidebarOverlayOpenRef.current = showGlobalSearch || showStatisticsOverview;
+  }, [showGlobalSearch, showStatisticsOverview]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
+        setShowStatisticsOverview(false);
         setShowGlobalSearch(true);
         return;
       }
-      if (e.key === 'Escape' && showGlobalSearchRef.current) {
+      if (e.key === 'Escape' && sidebarOverlayOpenRef.current) {
         e.preventDefault();
         setShowGlobalSearch(false);
+        setShowStatisticsOverview(false);
       }
     };
     window.addEventListener('keydown', onKeyDown, true);
@@ -713,6 +726,8 @@ export default function App() {
     setTodoMergeHint('');
     setEventMergeHint('');
     setNoteMergeHint('');
+    setShowGlobalSearch(false);
+    setShowStatisticsOverview(false);
     queueMicrotask(() => {
       if (typeof window === 'undefined') return;
       window.localStorage.setItem(WORKSPACE_MODE_KEY, 'personal');
@@ -2015,7 +2030,35 @@ export default function App() {
           </button>
           <button
             type="button"
-            onClick={() => setShowGlobalSearch((open) => !open)}
+            onClick={() =>
+              setShowStatisticsOverview((open) => {
+                const next = !open;
+                if (next) setShowGlobalSearch(false);
+                return next;
+              })
+            }
+            className={`
+              px-3 py-2 rounded-lg text-sm font-medium border transition-colors duration-200 flex items-center gap-1
+              ${
+                showStatisticsOverview
+                  ? 'border-[var(--shell-accent)] text-[var(--shell-accent)] bg-[var(--shell-accent)]/10'
+                  : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
+              }
+            `}
+            title={showStatisticsOverview ? '关闭统计（Esc）' : '打开统计概览，覆盖左侧任务栏'}
+          >
+            <BarChart3 className="w-4 h-4" />
+            统计
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              setShowGlobalSearch((open) => {
+                const next = !open;
+                if (next) setShowStatisticsOverview(false);
+                return next;
+              })
+            }
             className={`
               px-3 py-2 rounded-lg text-sm font-medium border transition-colors duration-200 flex items-center gap-1
               ${
@@ -2190,8 +2233,8 @@ export default function App() {
       <div className="flex-1 flex gap-6 min-h-0">
         <div className="relative h-full min-h-0 shrink-0">
           <div
-            className={`h-full min-h-0 transition-opacity duration-150 ${showGlobalSearch ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
-            aria-hidden={showGlobalSearch}
+            className={`h-full min-h-0 transition-opacity duration-150 ${showGlobalSearch || showStatisticsOverview ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
+            aria-hidden={showGlobalSearch || showStatisticsOverview}
           >
             <TodoSidebar
               todos={todos}
@@ -2265,6 +2308,17 @@ export default function App() {
                 onClose={() => setShowGlobalSearch(false)}
                 onJumpToDate={handleSearchJumpToDate}
                 onAddToTodayPlan={handleAddSearchResultToTodayPlan}
+              />
+            </div>
+          ) : null}
+          {showStatisticsOverview ? (
+            <div className="absolute inset-0 z-30 flex min-h-0 flex-col">
+              <StatisticsOverviewPanel
+                filteredTodos={filteredTodos}
+                events={events}
+                viewType={viewType}
+                currentDate={currentDate}
+                onClose={() => setShowStatisticsOverview(false)}
               />
             </div>
           ) : null}

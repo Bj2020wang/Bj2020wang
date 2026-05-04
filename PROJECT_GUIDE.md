@@ -1,8 +1,8 @@
-# 项目说明与功能入口（v0.2.5）
+# 项目说明与功能入口（v0.2.6）
 
 这份文档给你做长期参考：帮助你快速知道“哪个文件负责什么、功能入口在哪、以后怎么加功能不混乱”。
 
-> **版本**：应用与安装包以 **`src-tauri/tauri.conf.json` 的 `version`** 为准（当前 **0.2.5**），并与 Git 标签 **`v0.2.5`** 对齐；详见 CHANGELOG 与 `.cursorrules` 发布约定。
+> **版本**：应用与安装包以 **`src-tauri/tauri.conf.json` 的 `version`** 为准（当前 **0.2.6**），并与 Git 标签 **`v0.2.6`** 对齐；详见 CHANGELOG 与 `.cursorrules` 发布约定。
 
 ## 1. 目录与文件职责（关键）
 
@@ -161,7 +161,13 @@
 - **协作**：非个人视图时可切换 **含队友 / 只看我的**，与 `noteOwnerByDate`、事件 / 任务归属字段联动。
 - **扩展**：新检索字段或筛选项优先改 `GlobalSearchPanel.tsx`，必要时由 `App.tsx` 传入额外 props。
 
-### 2.11 本地开发（含局域网）
+### 2.11 统计概览
+- **入口**：顶栏 **「统计」**（在 **「搜索」左侧**，柱状图图标）；与搜索 **互斥**，同一时间仅占用左侧栏其一。
+- **布局**：与嵌入搜索相同——**绝对定位覆盖左侧 Todo 栏**（`App.tsx` 与 `GlobalSearchPanel` 并列的一层）；**Esc** 关闭；会话清空（未登录门禁）时一并关闭。
+- **与视图联动**：统计数据随顶栏 **Today / Week / Month / Year** 与 **`currentDate`** 变化，日期范围与 **`App.tsx` 中 `getFilteredTodos` / `getViewRange`** 一致。**待办总数**与 **任务分类分布**使用侧栏 **`filteredTodos`**；**日程总数**等与范围内日程交集过滤。**趋势图**：Today 为单日柱；Week 为当前周七日；Month 为本月每日（可横向滚动）；Year 为本年十二个月。
+- **实现**：`src/features/stats/StatisticsOverviewPanel.tsx`，接收 **`filteredTodos` / `events` / `viewType` / `currentDate`**。**已完成** = 范围内已勾选完成的日程数 + 范围内无关联日程且计数已归零的任务数；**完成率** 分母为「范围内日程条数 + 范围内未挂日历的任务条数」。
+
+### 2.12 本地开发（含局域网）
 - **常用**：根目录 `npm run dev`（Vite）。
 - **局域网**：`vite.config.ts` 已设 `server.host: true`，终端会打印 **Network** URL，手机等同网设备可访问（需防火墙放行端口）。
 
