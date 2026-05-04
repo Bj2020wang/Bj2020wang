@@ -152,7 +152,7 @@
 
 ### 2.9 年度视图与顶栏切换
 - **入口**：顶栏 **Year**（与 Day / Week / Month 并列）；标题区为 **`YYYY年`** + 年份下拉，左右箭头按 **年** 切换。
-- **数据范围**：`App.tsx` 中 `getViewRange` / `getFilteredTodos` 在 `viewType === 'year'` 时为全年区间；侧栏对「仅挂在日期、未入日历桶」的任务在年视图下默认不展开纯月桶列表（与注释约定一致）。
+- **数据范围**：`App.tsx` 中 **`getFilteredTodos`** 使用 **`getCalendarViewRange`**（`src/lib/viewRange.ts`）得到日期区间；在 `viewType === 'year'` 时为全年区间。侧栏对「仅挂在日期、未入日历桶」的任务在年视图下默认不展开纯月桶列表（与注释约定一致）。
 - **持久化**：导入导出与本地状态中 `viewType` 含 **`year`**（见 `types` 与校验逻辑）。
 
 ### 2.10 全局搜索
@@ -164,7 +164,7 @@
 ### 2.11 统计概览
 - **入口**：顶栏 **「统计」**（在 **「搜索」左侧**，柱状图图标）；与搜索 **互斥**，同一时间仅占用左侧栏其一。
 - **布局**：与嵌入搜索相同——**绝对定位覆盖左侧 Todo 栏**（`App.tsx` 与 `GlobalSearchPanel` 并列的一层）；**Esc** 关闭；会话清空（未登录门禁）时一并关闭。
-- **与视图联动**：统计数据随顶栏 **Today / Week / Month / Year** 与 **`currentDate`** 变化，日期范围与 **`App.tsx` 中 `getFilteredTodos` / `getViewRange`** 一致。**待办总数**与 **任务分类分布**使用侧栏 **`filteredTodos`**；**日程总数**等与范围内日程交集过滤。**趋势图**：Today 为单日柱；Week 为当前周七日；Month 为本月每日（可横向滚动）；Year 为本年十二个月。
+- **与视图联动**：统计数据随顶栏 **Today / Week / Month / Year** 与 **`currentDate`** 变化；日期区间与 **`getCalendarViewRange`**（`src/lib/viewRange.ts`）一致，并与 **`App.tsx` 中 `getFilteredTodos`** 共用。**待办总数**与 **任务分类分布**使用侧栏 **`filteredTodos`**；**日程总数**等与范围内日程交集过滤。**趋势图**：Today 为单日柱；Week 为当前周七日；Month 为本月每日（可横向滚动）；Year 为本年十二个月。
 - **实现**：`src/features/stats/StatisticsOverviewPanel.tsx`，接收 **`filteredTodos` / `events` / `viewType` / `currentDate`**。**已完成** = 范围内已勾选完成的日程数 + 范围内无关联日程且计数已归零的任务数；**完成率** 分母为「范围内日程条数 + 范围内未挂日历的任务条数」。
 
 ### 2.12 本地开发（含局域网）

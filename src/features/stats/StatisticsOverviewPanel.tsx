@@ -2,6 +2,7 @@ import { useMemo, type ReactNode } from 'react';
 import { BarChart3, CheckCircle2, Clock, Target, TrendingUp, X } from 'lucide-react';
 import type { CalendarEvent, TodoCategory, TodoItem, ViewType } from '@/types';
 import { formatDateKey, getWeekDays } from '@/lib/calendar-utils';
+import { getCalendarViewRange } from '@/lib/viewRange';
 
 interface StatisticsOverviewPanelProps {
   /** 与侧栏一致：当前视图下的任务子集 */
@@ -14,32 +15,6 @@ interface StatisticsOverviewPanelProps {
 
 function linkedEventsForTodo(todoId: string, events: CalendarEvent[]): CalendarEvent[] {
   return events.filter((e) => e.sourceTodoId === todoId);
-}
-
-/** 与 App.tsx `getFilteredTodos` / `getViewRange` 对齐 */
-function getStatsViewRange(viewType: ViewType, currentDate: Date): { start: string; end: string } {
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth() + 1;
-  const dom = currentDate.getDate();
-
-  if (viewType === 'today') {
-    const dayKey = formatDateKey(year, month, dom);
-    return { start: dayKey, end: dayKey };
-  }
-
-  if (viewType === 'week') {
-    const anchor = new Date(year, month - 1, dom);
-    const weekDays = getWeekDays(anchor);
-    return { start: weekDays[0].fullDate, end: weekDays[6].fullDate };
-  }
-
-  if (viewType === 'year') {
-    return { start: `${year}-01-01`, end: `${year}-12-31` };
-  }
-
-  const monthStart = formatDateKey(year, month, 1);
-  const monthEnd = formatDateKey(year, month, new Date(year, month, 0).getDate());
-  return { start: monthStart, end: monthEnd };
 }
 
 function rangesIntersect(aStart: string, aEnd: string, bStart: string, bEnd: string): boolean {
@@ -201,9 +176,8 @@ function scopeSubtitle(viewType: ViewType, currentDate: Date): string {
   if (viewType === 'today') return `当前范围：Today · ${y}年${m}月${d}日`;
   if (viewType === 'month') return `当前范围：Month · ${y}年${m}月`;
   if (viewType === 'year') return `当前范围：Year · ${y}年`;
-  const anchor = new Date(y, m - 1, d);
-  const w = getWeekDays(anchor);
-  return `当前范围：Week · ${w[0].fullDate}～${w[6].fullDate}`;
+  const r = getCalendarViewRange('week', currentDate);
+  return `当前范围：Week · ${r.start}～${r.end}`;
 }
 
 export default function StatisticsOverviewPanel({
@@ -213,7 +187,7 @@ export default function StatisticsOverviewPanel({
   currentDate,
   onClose,
 }: StatisticsOverviewPanelProps) {
-  const range = useMemo(() => getStatsViewRange(viewType, currentDate), [viewType, currentDate]);
+  const range = useMemo(() => getCalendarViewRange(viewType, currentDate), [viewType, currentDate]);
 
   const eventsScoped = useMemo(
     () => filterEventsInRange(events, range.start, range.end),

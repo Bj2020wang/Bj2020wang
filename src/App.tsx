@@ -29,6 +29,7 @@ import {
 import { hasSessionBusinessAuth } from '@/features/account/sessionAuthGate';
 import type { ViewType, CalendarEvent, TodoItem, TodoCategory, TodoScopeType } from '@/types';
 import { getMonthDays, getWeekDays } from '@/lib/calendar-utils';
+import { getCalendarViewRange } from '@/lib/viewRange';
 import { resolveTodoScopeType } from '@/lib/todoScope';
 import {
   buildWriteOwnTeamSnapshot,
@@ -713,22 +714,22 @@ export default function App() {
   useEffect(() => {
     if (businessToken) return;
     vaultHydrateSkippedRef.current = false;
-    setTodos([]);
-    setTodoTombstones({});
-    setEvents([]);
-    setEventTombstones({});
-    setNotesByDate({});
-    setNoteOwnerByDate({});
-    setNoteMetaByDate({});
-    setNoteTombstonesByDate({});
-    setCurrentDate(new Date());
-    setViewType('month');
-    setTodoMergeHint('');
-    setEventMergeHint('');
-    setNoteMergeHint('');
-    setShowGlobalSearch(false);
-    setShowStatisticsOverview(false);
     queueMicrotask(() => {
+      setTodos([]);
+      setTodoTombstones({});
+      setEvents([]);
+      setEventTombstones({});
+      setNotesByDate({});
+      setNoteOwnerByDate({});
+      setNoteMetaByDate({});
+      setNoteTombstonesByDate({});
+      setCurrentDate(new Date());
+      setViewType('month');
+      setTodoMergeHint('');
+      setEventMergeHint('');
+      setNoteMergeHint('');
+      setShowGlobalSearch(false);
+      setShowStatisticsOverview(false);
       if (typeof window === 'undefined') return;
       window.localStorage.setItem(WORKSPACE_MODE_KEY, 'personal');
       window.localStorage.removeItem(ACTIVE_TEAM_ID_KEY);
@@ -1190,42 +1191,6 @@ export default function App() {
     setShowJumpCalendar(false);
   }, []);
 
-  const handleAddSearchResultToTodayPlan = useCallback((title: string) => {
-    const today = new Date();
-    const todayKey = toDateKey(today);
-
-    const confirmed = window.confirm(`确认将“${title}”加入今日计划吗？`);
-    if (!confirmed) return;
-
-    const hasDuplicateToday = todosRef.current.some(
-      (todo) => todo.scopeType === 'day' && todo.date === todayKey && todo.text === title
-    );
-    if (hasDuplicateToday) {
-      const continueAdd = window.confirm('今日计划中已存在同名任务，是否仍然继续添加？');
-      if (!continueAdd) return;
-    }
-
-    const collab =
-      workspaceMode === 'team' && accountEmail ? normCollabEmail(accountEmail) : undefined;
-    setTodos((prev) => [
-      ...prev,
-      {
-        id: Date.now().toString(),
-        text: title,
-        category: 'work',
-        color: categoryColorMap.work,
-        month: today.getMonth() + 1,
-        date: todayKey,
-        scopeType: 'day',
-        count: null,
-        updatedAt: Date.now(),
-        ...(collab !== undefined ? { collabOwnerEmail: collab } : {}),
-      },
-    ]);
-    setCurrentDate(today);
-    setViewType('today');
-  }, [workspaceMode, accountEmail]);
-
   const handleUpdateTodo = useCallback((todoId: string, text: string, category: TodoCategory) => {
     if (
       workspaceMode === 'team' &&
@@ -1498,27 +1463,7 @@ export default function App() {
     const isInRange = (startDate: string, endDate: string, rangeStart: string, rangeEnd: string) =>
       !(endDate < rangeStart || startDate > rangeEnd);
 
-    const getViewRange = () => {
-      if (viewType === 'today') {
-        const dayKey = toDateKey(currentDate);
-        return { start: dayKey, end: dayKey };
-      }
-
-      if (viewType === 'week') {
-        const weekDays = getWeekDays(new Date(currentDate));
-        return { start: weekDays[0].fullDate, end: weekDays[6].fullDate };
-      }
-
-      if (viewType === 'year') {
-        return { start: `${year}-01-01`, end: `${year}-12-31` };
-      }
-
-      const monthStart = toDateKey(new Date(year, month - 1, 1));
-      const monthEnd = toDateKey(new Date(year, month, 0));
-      return { start: monthStart, end: monthEnd };
-    };
-
-    const { start, end } = getViewRange();
+    const { start, end } = getCalendarViewRange(viewType, currentDate);
     const todosWithEventsInRange = new Set(
       events
         .filter((event) => {
@@ -1673,7 +1618,9 @@ export default function App() {
     }
     const disk = loadPersistedData();
     if (!disk) return;
-    applyPersonalSnapshotReplace(disk);
+    queueMicrotask(() => {
+      applyPersonalSnapshotReplace(disk);
+    });
   }, [businessToken, applyPersonalSnapshotReplace]);
 
   const applyTeamCloudSnapshot = useCallback(
@@ -2307,7 +2254,6 @@ export default function App() {
                 noteOwnerByDate={noteOwnerByDate}
                 onClose={() => setShowGlobalSearch(false)}
                 onJumpToDate={handleSearchJumpToDate}
-                onAddToTodayPlan={handleAddSearchResultToTodayPlan}
               />
             </div>
           ) : null}

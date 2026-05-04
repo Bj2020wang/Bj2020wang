@@ -2,7 +2,7 @@
 
 ## v0.2.6
 
-- **统计概览联动**：`StatisticsOverviewPanel` 与顶栏 **Today / Week / Month / Year** 及 **`currentDate`** 对齐；**待办总数**、**分类分布**使用侧栏 **`filteredTodos`**；日程统计与 **`App.tsx` 中 `getViewRange`** 区间一致；趋势图为 **单日 / 自然周七日 / 本月每日（可横向滚动）/ 本年按月**（详见 `PROJECT_GUIDE.md` §2.11）。
+- **统计概览联动**：`StatisticsOverviewPanel` 与顶栏 **Today / Week / Month / Year** 及 **`currentDate`** 对齐；**待办总数**、**分类分布**使用侧栏 **`filteredTodos`**；日程统计与 **`getCalendarViewRange`**（`src/lib/viewRange.ts`，与 **`App.tsx` 中 `getFilteredTodos`** 共用）区间一致；趋势图为 **单日 / 自然周七日 / 本月每日（可横向滚动）/ 本年按月**（详见 `PROJECT_GUIDE.md` §2.11）。
 - **版本对齐**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`app` 包）均为 **0.2.6**；发布安装包与 Git 标签请使用 **`v0.2.6`**（见 `.cursorrules`）。
 
 ## v0.2.5

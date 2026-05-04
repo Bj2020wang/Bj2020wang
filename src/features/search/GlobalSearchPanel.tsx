@@ -9,7 +9,6 @@ interface GlobalSearchPanelProps {
   notesByDate: Record<string, string>;
   onClose: () => void;
   onJumpToDate: (dateStr: string) => void;
-  onAddToTodayPlan: (title: string) => void;
   /** 嵌入左侧 Todo 栏：不占满屏，由父级提供尺寸 */
   embedded?: boolean;
   /** 协作云下用于「只看我的 / 含队友」 */
@@ -299,7 +298,6 @@ export default function GlobalSearchPanel({
   notesByDate,
   onClose,
   onJumpToDate,
-  onAddToTodayPlan: _onAddToTodayPlan,
   embedded = false,
   workspaceMode = 'personal',
   accountEmail = null,
