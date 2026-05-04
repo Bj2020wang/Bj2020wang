@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { BookOpen, Briefcase, Dumbbell, Heart, Search, X } from 'lucide-react';
 import type { CalendarEvent, TodoCategory, TodoItem } from '@/types';
 import { isPeerEventInTeam, isPeerTodoInTeam, normCollabEmail } from '@/lib/teamCollab';
@@ -97,6 +97,38 @@ const CATEGORY_STYLE: Record<
 
 const SAVED_QUERIES_KEY = 'global-search-saved-queries-v1';
 const MAX_SAVED_QUERY_COUNT = 8;
+
+/** 筛选区 / 结果区分隔：可拖动调节高度（按嵌入 / 弹层分别记忆） */
+const FILTER_SPLIT_STORAGE_KEY = 'global-search-filter-pane-px-v1';
+const FILTER_SPLIT_MIN_FILTER_PX = 100;
+const FILTER_SPLIT_MIN_RESULTS_PX = 88;
+const FILTER_SPLITTER_HIT_PX = 12;
+
+function loadFilterPaneHeight(embedded: boolean): number {
+  const fallback = embedded ? 168 : 224;
+  try {
+    const raw = window.localStorage.getItem(FILTER_SPLIT_STORAGE_KEY);
+    if (!raw) return fallback;
+    const o = JSON.parse(raw) as { embedded?: unknown; modal?: unknown };
+    const v = embedded ? o.embedded : o.modal;
+    if (typeof v === 'number' && Number.isFinite(v) && v >= FILTER_SPLIT_MIN_FILTER_PX) return v;
+  } catch {
+    /* ignore */
+  }
+  return fallback;
+}
+
+function saveFilterPaneHeight(embedded: boolean, px: number) {
+  try {
+    const raw = window.localStorage.getItem(FILTER_SPLIT_STORAGE_KEY);
+    const o: { embedded?: number; modal?: number } = raw ? JSON.parse(raw) : {};
+    if (embedded) o.embedded = px;
+    else o.modal = px;
+    window.localStorage.setItem(FILTER_SPLIT_STORAGE_KEY, JSON.stringify(o));
+  } catch {
+    /* ignore */
+  }
+}
 
 function loadQueryStats(): Record<string, number> {
   try {
@@ -289,8 +321,10 @@ export default function GlobalSearchPanel({
   const [includeNotes, setIncludeNotes] = useState(true);
   const [todoCategoryFilter, setTodoCategoryFilter] = useState<'all' | TodoCategory>('all');
   const [queryStats, setQueryStats] = useState<Record<string, number>>(() => loadQueryStats());
+  const [filterPaneHeightPx, setFilterPaneHeightPx] = useState(() => loadFilterPaneHeight(embedded));
 
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const splitRootRef = useRef<HTMLDivElement>(null);
   const weekStripRef = useRef<HTMLDivElement>(null);
   const monthStripRef = useRef<HTMLDivElement>(null);
   const monthYearStripRef = useRef<HTMLDivElement>(null);
@@ -338,6 +372,29 @@ export default function GlobalSearchPanel({
     if (dateFilterMode === 'year') return `在${yearPicker}年中搜索…`;
     return '搜索日程、任务与笔记…';
   }, [dateFilterMode, monthPicker.year, monthPicker.month, weekOffset, yearPicker]);
+
+  useEffect(() => {
+    setFilterPaneHeightPx(loadFilterPaneHeight(embedded));
+  }, [embedded]);
+
+  useEffect(() => {
+    const root = splitRootRef.current;
+    if (!root) return;
+    const clamp = () => {
+      const total = root.getBoundingClientRect().height;
+      const maxFilter = Math.max(
+        FILTER_SPLIT_MIN_FILTER_PX,
+        total - FILTER_SPLIT_MIN_RESULTS_PX - FILTER_SPLITTER_HIT_PX
+      );
+      setFilterPaneHeightPx((h) =>
+        Math.min(Math.max(h, FILTER_SPLIT_MIN_FILTER_PX), maxFilter)
+      );
+    };
+    const ro = new ResizeObserver(clamp);
+    ro.observe(root);
+    clamp();
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     if (dateFilterMode !== 'week' || !weekStripRef.current) return;
@@ -723,10 +780,64 @@ export default function GlobalSearchPanel({
         : 'border border-[var(--shell-border-subtle)] text-[var(--shell-text-muted)] bg-[var(--shell-input-deep)]/80 hover:bg-[var(--shell-surface-hover)]'
     }`;
 
-  /** 筛选区限制高度，剩余空间全部给结果列表（原统计模块区域并入结果区） */
-  const filterScrollClass = embedded
-    ? 'min-h-0 max-h-[min(38%,10.5rem)] shrink-0 space-y-3 overflow-y-auto border-b border-[var(--shell-border-subtle)] px-5 py-3'
-    : 'min-h-0 max-h-[min(28vh,14rem)] shrink-0 space-y-3 overflow-y-auto border-b border-[var(--shell-border-subtle)] px-5 py-4';
+  const handleSplitMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const root = splitRootRef.current;
+      if (!root) return;
+      const startY = e.clientY;
+      const startH = filterPaneHeightPx;
+      let currentH = startH;
+
+      const onMove = (ev: MouseEvent) => {
+        const total = root.getBoundingClientRect().height;
+        const maxFilter = Math.max(
+          FILTER_SPLIT_MIN_FILTER_PX,
+          total - FILTER_SPLIT_MIN_RESULTS_PX - FILTER_SPLITTER_HIT_PX
+        );
+        const dy = ev.clientY - startY;
+        currentH = Math.min(maxFilter, Math.max(FILTER_SPLIT_MIN_FILTER_PX, startH + dy));
+        setFilterPaneHeightPx(currentH);
+      };
+
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.body.style.removeProperty('cursor');
+        document.body.style.removeProperty('user-select');
+        saveFilterPaneHeight(embedded, currentH);
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      document.body.style.cursor = 'row-resize';
+      document.body.style.userSelect = 'none';
+    },
+    [embedded, filterPaneHeightPx]
+  );
+
+  const nudgeFilterHeight = useCallback(
+    (delta: number) => {
+      const root = splitRootRef.current;
+      if (!root) return;
+      const total = root.getBoundingClientRect().height;
+      const maxFilter = Math.max(
+        FILTER_SPLIT_MIN_FILTER_PX,
+        total - FILTER_SPLIT_MIN_RESULTS_PX - FILTER_SPLITTER_HIT_PX
+      );
+      setFilterPaneHeightPx((h) => {
+        const next = Math.min(maxFilter, Math.max(FILTER_SPLIT_MIN_FILTER_PX, h + delta));
+        saveFilterPaneHeight(embedded, next);
+        return next;
+      });
+    },
+    [embedded]
+  );
+
+  const filterInnerClass = embedded
+    ? 'min-h-0 shrink-0 space-y-3 overflow-y-auto px-5 py-3'
+    : 'min-h-0 shrink-0 space-y-3 overflow-y-auto px-5 py-4';
 
   return (
     <SearchPanelShell embedded={embedded}>
@@ -745,8 +856,8 @@ export default function GlobalSearchPanel({
           </button>
         </div>
 
-        <div className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className={filterScrollClass}>
+        <div ref={splitRootRef} className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className={filterInnerClass} style={{ height: filterPaneHeightPx }}>
           <div className="relative">
             <Search
               className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--shell-subtle)]"
@@ -973,6 +1084,33 @@ export default function GlobalSearchPanel({
               </button>
             </div>
           )}
+        </div>
+
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-valuemin={FILTER_SPLIT_MIN_FILTER_PX}
+          aria-valuemax={900}
+          aria-valuenow={Math.round(filterPaneHeightPx)}
+          tabIndex={0}
+          aria-label="拖动调节筛选区与结果区高度，上下方向键微调"
+          className="group relative z-10 flex shrink-0 cursor-row-resize items-center justify-center border-y border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] outline-none hover:bg-[var(--shell-surface-hover)] focus-visible:ring-2 focus-visible:ring-[var(--shell-accent)]/35"
+          style={{ height: FILTER_SPLITTER_HIT_PX }}
+          onMouseDown={handleSplitMouseDown}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              nudgeFilterHeight(-12);
+            } else if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              nudgeFilterHeight(12);
+            }
+          }}
+        >
+          <span
+            className="pointer-events-none h-1 w-12 rounded-full bg-[var(--shell-border-subtle)] opacity-70 transition-opacity group-hover:opacity-100"
+            aria-hidden
+          />
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-2">
