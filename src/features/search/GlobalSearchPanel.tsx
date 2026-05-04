@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { BookOpen, Briefcase, Dumbbell, Globe, Heart, Search, X } from 'lucide-react';
 import type { CalendarEvent, TodoCategory, TodoItem } from '@/types';
 import { isPeerEventInTeam, isPeerTodoInTeam, normCollabEmail } from '@/lib/teamCollab';
 
@@ -10,11 +10,30 @@ interface GlobalSearchPanelProps {
   onClose: () => void;
   onJumpToDate: (dateStr: string) => void;
   onAddToTodayPlan: (title: string) => void;
+  /** 嵌入左侧 Todo 栏：不占满屏，由父级提供尺寸 */
+  embedded?: boolean;
   /** 协作云下用于「只看我的 / 含队友」 */
   workspaceMode?: 'personal' | 'team';
   accountEmail?: string | null;
   teamOwnerEmail?: string | null;
   noteOwnerByDate?: Record<string, string>;
+}
+
+function SearchPanelShell({ embedded, children }: { embedded: boolean; children: ReactNode }) {
+  if (embedded) {
+    return (
+      <div className="flex h-full min-h-0 w-full flex-col overflow-hidden rounded-xl border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] shadow-lg">
+        {children}
+      </div>
+    );
+  }
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
+      <div className="flex h-[min(92dvh,52rem)] min-h-0 w-full max-w-lg flex-col overflow-hidden rounded-t-[1.75rem] border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] shadow-2xl sm:h-[min(88vh,44rem)] sm:max-w-xl sm:rounded-2xl">
+        {children}
+      </div>
+    </div>
+  );
 }
 
 type SearchResultKind = 'event' | 'todo' | 'note';
@@ -48,6 +67,32 @@ const KIND_LABEL: Record<SearchResultKind, string> = {
   event: '日程',
   todo: '任务',
   note: '笔记',
+};
+
+const CATEGORY_STYLE: Record<
+  TodoCategory,
+  { label: string; icon: typeof Briefcase; chipClass: string }
+> = {
+  work: {
+    label: '工作',
+    icon: Briefcase,
+    chipClass: 'bg-rose-500/15 text-rose-200 border-rose-500/35',
+  },
+  life: {
+    label: '生活',
+    icon: Heart,
+    chipClass: 'bg-violet-500/15 text-violet-200 border-violet-500/35',
+  },
+  study: {
+    label: '学习',
+    icon: BookOpen,
+    chipClass: 'bg-sky-500/15 text-sky-200 border-sky-500/35',
+  },
+  health: {
+    label: '健康',
+    icon: Dumbbell,
+    chipClass: 'bg-emerald-500/15 text-emerald-200 border-emerald-500/35',
+  },
 };
 
 const SAVED_QUERIES_KEY = 'global-search-saved-queries-v1';
@@ -190,6 +235,11 @@ function noteExcerpt(body: string, maxLen = 72): string {
 }
 
 /** 单行展示：围绕首次命中关键词截取，便于与全局高亮一致 */
+function formatSearchResultDateTime(item: SearchResultItem): string {
+  if (!item.date) return '未排期';
+  return item.time ? `${item.date} ${item.time}` : item.date;
+}
+
 function noteSnippetAroundKeyword(body: string, keyword: string, maxLen = 96): string {
   const q = keyword.trim();
   if (!q) return noteExcerpt(body, maxLen);
@@ -217,7 +267,8 @@ export default function GlobalSearchPanel({
   notesByDate,
   onClose,
   onJumpToDate,
-  onAddToTodayPlan,
+  onAddToTodayPlan: _onAddToTodayPlan,
+  embedded = false,
   workspaceMode = 'personal',
   accountEmail = null,
   teamOwnerEmail = null,
@@ -270,6 +321,23 @@ export default function GlobalSearchPanel({
     if (dateFilterMode === 'month') return `${monthPicker.year}年${monthPicker.month}月`;
     return `${yearPicker}年`;
   }, [dateFilterMode, weekOffset, monthPicker.year, monthPicker.month, yearPicker]);
+
+  const searchContextLabel = useMemo(() => {
+    if (dateFilterMode === 'month') return `${monthPicker.year}年${monthPicker.month}月`;
+    return dateFilterSummary;
+  }, [dateFilterMode, dateFilterSummary, monthPicker.year, monthPicker.month]);
+
+  const searchPlaceholder = useMemo(() => {
+    if (dateFilterMode === 'month') return `在${monthPicker.year}年${monthPicker.month}月中搜索…`;
+    if (dateFilterMode === 'week') {
+      const now = new Date();
+      const tag =
+        weekOffset === 0 ? '本周' : weekOffset === -1 ? '上周' : weekOffset === 1 ? '下周' : formatWeekScrollLabel(weekOffset, now);
+      return `在${tag}中搜索…`;
+    }
+    if (dateFilterMode === 'year') return `在${yearPicker}年中搜索…`;
+    return '搜索日程、任务与笔记…';
+  }, [dateFilterMode, monthPicker.year, monthPicker.month, weekOffset, yearPicker]);
 
   useEffect(() => {
     if (dateFilterMode !== 'week' || !weekStripRef.current) return;
@@ -626,10 +694,10 @@ export default function GlobalSearchPanel({
   };
 
   const chipBtn = (active: boolean) =>
-    `px-2.5 py-1.5 text-xs rounded-md border transition-colors ${
+    `px-3 py-1.5 text-xs font-medium rounded-full border transition-colors ${
       active
-        ? 'border-[var(--shell-accent)] text-[var(--shell-accent)] bg-[var(--shell-accent)]/10'
-        : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
+        ? 'border-2 border-[var(--shell-accent)] text-[var(--shell-accent)] bg-[var(--shell-accent)]/12'
+        : 'border border-[var(--shell-border-subtle)] text-[var(--shell-text-muted)] bg-[var(--shell-input-deep)]/80 hover:bg-[var(--shell-surface-hover)] hover:border-[var(--shell-border)]'
     }`;
 
   const scrollRowClass =
@@ -648,52 +716,84 @@ export default function GlobalSearchPanel({
     });
   };
 
+  const stripChip = (active: boolean) =>
+    `shrink-0 snap-center whitespace-nowrap px-3 py-1.5 text-xs font-medium rounded-full border transition-colors ${
+      active
+        ? 'border-2 border-[var(--shell-accent)] text-[var(--shell-accent)] bg-[var(--shell-accent)]/12'
+        : 'border border-[var(--shell-border-subtle)] text-[var(--shell-text-muted)] bg-[var(--shell-input-deep)]/80 hover:bg-[var(--shell-surface-hover)]'
+    }`;
+
+  /** 筛选区限制高度，剩余空间全部给结果列表（原统计模块区域并入结果区） */
+  const filterScrollClass = embedded
+    ? 'min-h-0 max-h-[min(38%,10.5rem)] shrink-0 space-y-3 overflow-y-auto border-b border-[var(--shell-border-subtle)] px-5 py-3'
+    : 'min-h-0 max-h-[min(28vh,14rem)] shrink-0 space-y-3 overflow-y-auto border-b border-[var(--shell-border-subtle)] px-5 py-4';
+
   return (
-    <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4">
-      <div className="flex h-[min(85vh,44rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] shadow-2xl">
-        <div className="flex flex-shrink-0 items-center justify-between px-4 py-3 border-b border-[var(--shell-border-subtle)]">
+    <SearchPanelShell embedded={embedded}>
+        <div className="flex shrink-0 items-start justify-between px-5 pb-2 pt-5">
           <div>
-            <h2 className="text-lg text-[var(--shell-text-strong)] font-semibold">全局关键词搜索</h2>
-            <p className="text-xs text-[var(--shell-text-muted)] mt-1">
-              Ctrl+K / ⌘K 打开，Esc 关闭。搜索日程、任务标题与当日笔记正文；完成状态仅作用于日程与任务。
-              {showCollabSearchFilters ? ' 协作区可筛选「只看我的 / 含队友」。' : ''} 点击结果跳转到该日「日历」视图。
-            </p>
+            <h2 className="text-2xl font-semibold tracking-tight text-[var(--shell-text-strong)]">搜索</h2>
+            <p className="mt-1 text-sm text-[var(--shell-text-muted)]">{searchContextLabel}</p>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-lg hover:bg-[var(--shell-surface-hover)] flex items-center justify-center"
-            title="关闭搜索"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)] text-[var(--shell-text-muted)] transition-colors hover:bg-[var(--shell-surface-hover)] hover:text-[var(--shell-text-strong)]"
+            title="关闭（Esc）"
           >
-            <X className="w-4 h-4 text-[var(--shell-text-muted)]" />
+            <X className="h-5 w-5" strokeWidth={2} />
           </button>
         </div>
 
-        <div className="flex-shrink-0 px-4 py-3 border-b border-[var(--shell-border-subtle)] space-y-2 max-h-[min(58vh,30rem)] overflow-y-auto">
-          <input
-            ref={searchInputRef}
-            type="text"
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-            placeholder="输入关键词（搜日程标题、任务文字、笔记内容）"
-            className="w-full px-3 py-2 bg-[var(--shell-input-deep)] border border-[var(--shell-border-subtle)] rounded-lg text-sm text-[var(--shell-text-strong)] placeholder-[var(--shell-placeholder)] focus:outline-none focus:border-[var(--shell-accent)]"
-          />
+        <p
+          className="hidden shrink-0 px-5 text-[11px] leading-relaxed text-[var(--shell-subtle)] sm:block"
+          title="快捷键与搜索范围"
+        >
+          Ctrl+K / ⌘K 打开 · Esc 关闭 · 结果点击跳转日历。完成筛选仅作用于日程与任务。
+          {showCollabSearchFilters ? ' 协作区可筛选只看我的/含队友。' : ''}
+        </p>
+        <p className="shrink-0 px-5 text-[11px] text-[var(--shell-subtle)] sm:hidden">Esc 关闭 · 点击结果跳转日历</p>
+
+        <div className="mx-5 mt-3 flex shrink-0 items-center justify-between gap-3 rounded-2xl border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)] px-4 py-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <Globe className="h-5 w-5 shrink-0 text-[var(--shell-accent)]" strokeWidth={2} aria-hidden />
+            <span className="truncate text-sm font-medium text-[var(--shell-text-strong)]">全局搜索</span>
+          </div>
+          <span className="shrink-0 text-xs text-[var(--shell-text-muted)]">{searchContextLabel}</span>
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className={filterScrollClass}>
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--shell-subtle)]"
+              aria-hidden
+            />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              placeholder={searchPlaceholder}
+              className="w-full rounded-2xl border border-[var(--shell-border-subtle)] bg-[var(--shell-bg)] py-3 pl-11 pr-4 text-sm text-[var(--shell-text-strong)] placeholder-[var(--shell-placeholder)] focus:border-[var(--shell-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--shell-accent)]/25"
+            />
+          </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] text-[var(--shell-subtle)] shrink-0">完成</span>
-            {(['all', 'incomplete', 'complete'] as const).map((key) => (
+            {(['all', 'complete', 'incomplete'] as const).map((key) => (
               <button
                 key={key}
                 type="button"
                 onClick={() => setCompletionFilter(key)}
                 className={chipBtn(completionFilter === key)}
               >
-                {key === 'all' ? '全部' : key === 'incomplete' ? '未完成' : '已完成'}
+                {key === 'all' ? '全部' : key === 'complete' ? '已完成' : '未完成'}
               </button>
             ))}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] text-[var(--shell-subtle)] shrink-0">日期</span>
+            <span className="shrink-0 text-[11px] text-[var(--shell-subtle)]">日期</span>
             {(['all', 'week', 'month', 'year'] as const).map((key) => (
               <button
                 key={key}
@@ -716,11 +816,7 @@ export default function GlobalSearchPanel({
                     type="button"
                     data-week-selected={o === weekOffset ? 'true' : undefined}
                     onClick={() => setWeekOffset(o)}
-                    className={`shrink-0 snap-center whitespace-nowrap px-2.5 py-1.5 text-xs rounded-md border transition-colors ${
-                      weekOffset === o
-                        ? 'border-[var(--shell-accent)] text-[var(--shell-accent)] bg-[var(--shell-accent)]/10'
-                        : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
-                    }`}
+                    className={stripChip(weekOffset === o)}
                   >
                     {formatWeekScrollLabel(o)}
                   </button>
@@ -740,11 +836,7 @@ export default function GlobalSearchPanel({
                       type="button"
                       data-month-year-selected={y === monthPicker.year ? 'true' : undefined}
                       onClick={() => setMonthPicker((prev) => ({ ...prev, year: y }))}
-                      className={`shrink-0 snap-center whitespace-nowrap px-2.5 py-1.5 text-xs rounded-md border transition-colors ${
-                        monthPicker.year === y
-                          ? 'border-[var(--shell-accent)] text-[var(--shell-accent)] bg-[var(--shell-accent)]/10'
-                          : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
-                      }`}
+                      className={stripChip(monthPicker.year === y)}
                     >
                       {y}年
                     </button>
@@ -760,11 +852,7 @@ export default function GlobalSearchPanel({
                       type="button"
                       data-month-selected={mo === monthPicker.month ? 'true' : undefined}
                       onClick={() => setMonthPicker((prev) => ({ ...prev, month: mo }))}
-                      className={`shrink-0 snap-center whitespace-nowrap px-2.5 py-1.5 text-xs rounded-md border transition-colors ${
-                        monthPicker.month === mo
-                          ? 'border-[var(--shell-accent)] text-[var(--shell-accent)] bg-[var(--shell-accent)]/10'
-                          : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
-                      }`}
+                      className={stripChip(monthPicker.month === mo)}
                     >
                       {mo}月
                     </button>
@@ -784,11 +872,7 @@ export default function GlobalSearchPanel({
                     type="button"
                     data-year-selected={y === yearPicker ? 'true' : undefined}
                     onClick={() => setYearPicker(y)}
-                    className={`shrink-0 snap-center whitespace-nowrap px-2.5 py-1.5 text-xs rounded-md border transition-colors ${
-                      yearPicker === y
-                        ? 'border-[var(--shell-accent)] text-[var(--shell-accent)] bg-[var(--shell-accent)]/10'
-                        : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
-                    }`}
+                    className={stripChip(yearPicker === y)}
                   >
                     {y}年
                   </button>
@@ -798,7 +882,7 @@ export default function GlobalSearchPanel({
           )}
 
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] text-[var(--shell-subtle)] shrink-0">类型</span>
+            <span className="shrink-0 text-[11px] text-[var(--shell-subtle)]">类型</span>
             <button type="button" onClick={() => setIncludeEvents((v) => !v)} className={chipBtn(includeEvents)}>
               日程
             </button>
@@ -812,7 +896,7 @@ export default function GlobalSearchPanel({
 
           {showCollabSearchFilters && (
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[11px] text-[var(--shell-subtle)] shrink-0">协作</span>
+              <span className="shrink-0 text-[11px] text-[var(--shell-subtle)]">协作</span>
               <button
                 type="button"
                 onClick={() => setCollabResultScope('all')}
@@ -830,30 +914,48 @@ export default function GlobalSearchPanel({
             </div>
           )}
 
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] text-[var(--shell-subtle)] shrink-0">任务分类</span>
-            <button type="button" onClick={() => setTodoCategoryFilter('all')} className={chipBtn(todoCategoryFilter === 'all')}>
-              全部
-            </button>
-            {(Object.keys(CATEGORY_LABEL) as TodoCategory[]).map((cat) => (
-              <button key={cat} type="button" onClick={() => setTodoCategoryFilter(cat)} className={chipBtn(todoCategoryFilter === cat)}>
-                {CATEGORY_LABEL[cat]}
+          <div className="space-y-2">
+            <span className="text-[11px] text-[var(--shell-subtle)]">任务分类</span>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setTodoCategoryFilter('all')}
+                className={chipBtn(todoCategoryFilter === 'all')}
+              >
+                全部分类
               </button>
-            ))}
+              {(Object.keys(CATEGORY_LABEL) as TodoCategory[]).map((cat) => {
+                const meta = CATEGORY_STYLE[cat];
+                const Icon = meta.icon;
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setTodoCategoryFilter(cat)}
+                    className={`inline-flex items-center gap-1.5 ${chipBtn(todoCategoryFilter === cat)}`}
+                  >
+                    <Icon className="h-3.5 w-3.5 opacity-90" strokeWidth={2} aria-hidden />
+                    {meta.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="flex flex-wrap gap-2">
             <button
+              type="button"
               onClick={handleExportCsv}
-              className="px-3 py-2 text-xs rounded-md border border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] transition-colors"
+              className="rounded-full border border-[var(--shell-border-subtle)] px-3 py-2 text-xs text-[var(--shell-text-muted)] transition-colors hover:bg-[var(--shell-surface-hover)]"
             >
-              导出当前结果 CSV
+              导出 CSV
             </button>
             <button
+              type="button"
               onClick={handleExportBriefTxt}
-              className="px-3 py-2 text-xs rounded-md border border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] transition-colors"
+              className="rounded-full border border-[var(--shell-border-subtle)] px-3 py-2 text-xs text-[var(--shell-text-muted)] transition-colors hover:bg-[var(--shell-surface-hover)]"
             >
-              导出简报 TXT
+              导出简报
             </button>
           </div>
 
@@ -888,98 +990,42 @@ export default function GlobalSearchPanel({
               </button>
             </div>
           )}
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <div className="rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)] px-3 py-2">
-              <div className="text-[11px] text-[var(--shell-subtle)]">命中总数</div>
-              <div className="text-sm font-semibold text-[var(--shell-text-strong)]">{resultStats.total}</div>
-            </div>
-            <div className="rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)] px-3 py-2">
-              <div className="text-[11px] text-[var(--shell-subtle)]">日程/任务未完成</div>
-              <div className="text-sm font-semibold text-[var(--shell-accent)]">{resultStats.incomplete}</div>
-            </div>
-            <div className="rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)] px-3 py-2">
-              <div className="text-[11px] text-[var(--shell-subtle)]">有具体时间</div>
-              <div className="text-sm font-semibold text-[#10B981]">{resultStats.withTime}</div>
-            </div>
-            <div className="rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)] px-3 py-2">
-              <div className="text-[11px] text-[var(--shell-subtle)]">日程/任务完成率</div>
-              <div className="text-sm font-semibold text-[#60A5FA]">{resultStats.completionRate}%</div>
-            </div>
-          </div>
-          <div className="text-[11px] text-[var(--shell-text-muted)]">
-            分布：日程 {kindCounts.event} · 任务 {kindCounts.todo} · 笔记 {kindCounts.note}
-          </div>
-          {!!keyword.trim() && monthlyDistribution.length > 0 && (
-            <div className="rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)] px-3 py-2">
-              <div className="text-[11px] text-[var(--shell-subtle)] mb-1">按月命中分布（最近 6 个月）</div>
-              <div className="flex flex-wrap gap-2">
-                {monthlyDistribution.map(([month, count]) => (
-                  <span key={month} className="px-2 py-1 text-xs rounded-md border border-[var(--shell-border)] text-[var(--shell-text-muted)]">
-                    {month}: {count}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-2">
           {!keyword.trim() && (
-            <p className="text-sm text-[var(--shell-subtle)] py-8 text-center">输入关键词即可搜索日程、任务与笔记</p>
+            <p className="py-10 text-center text-sm text-[var(--shell-subtle)]">输入关键词搜索日程、任务与笔记</p>
           )}
           {!!keyword.trim() && results.length === 0 && (
-            <p className="text-sm text-[var(--shell-subtle)] py-8 text-center">没有命中结果，请调整关键词或筛选条件</p>
+            <p className="py-10 text-center text-sm text-[var(--shell-subtle)]">没有命中结果，试试别的关键词或筛选</p>
           )}
-          {results.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => {
-                if (item.date) onJumpToDate(item.date);
-              }}
-              disabled={!item.date}
-              className={`w-full text-left mb-2 px-3 py-2 rounded-lg border border-[var(--shell-border-subtle)] transition-colors ${
-                item.date ? 'hover:bg-[var(--shell-list-hover)]' : 'opacity-60 cursor-not-allowed'
-              }`}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-[var(--shell-border)] text-[var(--shell-text-muted)]">
-                    {KIND_LABEL[item.kind]}
-                  </span>
-                  <div className="text-sm text-[var(--shell-text-strong)] font-medium truncate">{renderHighlightedTitle(item.title)}</div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {item.kind !== 'note' && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onAddToTodayPlan(item.title);
-                      }}
-                      className="px-2 py-1 text-[11px] rounded-md border border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] transition-colors"
-                      title="加入今日计划"
-                    >
-                      加入今日计划
-                    </button>
-                  )}
-                  <div
-                    className={`text-xs ${item.kind === 'note' ? 'text-[var(--shell-text-muted)]' : item.completed ? 'text-[#10B981]' : 'text-[var(--shell-accent)]'}`}
-                  >
-                    {item.kind === 'note' ? '笔记' : item.completed ? '已完成' : '未完成'}
-                  </div>
-                </div>
-              </div>
-              <div className="text-xs text-[var(--shell-text-muted)] mt-1">
-                {item.date ? `日期：${item.date}` : '日期：未排期（无法跳转）'}
-                {item.time ? ` ${item.time}` : item.kind !== 'note' ? ' · 无具体时刻' : ''}
-                {item.detail ? ` · ${item.detail}` : ''}
-              </div>
-            </button>
-          ))}
+          {!!keyword.trim() && results.length > 0 && (
+            <p className="mb-3 text-sm font-medium text-[var(--shell-text-strong)]">找到 {results.length} 个结果</p>
+          )}
+          <div className="space-y-2">
+            {results.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  if (item.date) onJumpToDate(item.date);
+                }}
+                disabled={!item.date}
+                className={`flex w-full items-baseline justify-between gap-3 rounded-xl border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)]/40 px-3 py-2.5 text-left transition-colors ${
+                  item.date ? 'hover:border-[var(--shell-accent)]/40 hover:bg-[var(--shell-list-hover)]' : 'cursor-not-allowed opacity-60'
+                }`}
+              >
+                <span className="min-w-0 flex-1 truncate text-sm font-medium leading-snug text-[var(--shell-text-strong)]">
+                  {renderHighlightedTitle(item.title)}
+                </span>
+                <span className="shrink-0 tabular-nums text-xs text-[var(--shell-text-muted)]">
+                  {formatSearchResultDateTime(item)}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
-    </div>
+        </div>
+    </SearchPanelShell>
   );
 }

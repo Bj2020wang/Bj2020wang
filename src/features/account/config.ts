@@ -14,10 +14,10 @@ export const CLOUDBASE_PUBLISHABLE_KEY =
 /** HTTP 访问服务上的路由路径（与控制台配置一致） */
 export const ACCOUNT_HTTP_PATH = '/test';
 
-/** 业务登录 token（verify-code 返回），仅存内存/sessionStorage */
+/** 业务登录 token（verify-code 返回）；仅存 sessionStorage，关标签/非正常退出即失效，需重新登录 */
 export const ACCOUNT_TOKEN_KEY = 'todo-calendar-account-token';
 
-/** 当前业务登录邮箱（小写），用于直连数据库查询与 watch */
+/** 当前业务登录邮箱（小写）；与 token 同存 sessionStorage */
 export const ACCOUNT_EMAIL_KEY = 'todo-calendar-account-email';
 
 /** 云开发内置邮箱验证码流程：发码接口返回的 verification_id（与邮箱成对暂存） */

@@ -3,6 +3,9 @@
 ## v0.2.5
 
 - **Todo 时间范围与侧栏筛选**：`TodoItem` 增加可选 **`scopeYear`**，`TodoScopeType` 含 **`year`**（年度视图下新建为年度任务）。**Today / Week / Month / Year** 切换时，侧栏仅列出与当前时间段匹配的任务（日历上在该时间段内有安排的仍会显示）。每条任务标题上方展示 **`formatTodoScopeLabel`**（`src/lib/todoScope.ts`）；拖拽单日任务改期时同步更新 `date` / `month` / `scopeYear`。默认示例数据补充 `scopeType` / `scopeYear` 以便对齐月历示例年。
+- **登录态与本地快照（安全）**：`useAccountAuth` 业务 token / 邮箱仅 **sessionStorage**；启动时 **purge** 可能残留在 **localStorage** 的旧凭证键。`App` 在未登录时不加载本地快照至界面、不向磁盘写日历数据；登出或失效时清空视图并回到个人工作区；登录成功后从磁盘灌入再继续云端拉取合并。新增 **`sessionAuthGate.ts`**（`hasSessionBusinessAuth`）。
+- **全局搜索**：`GlobalSearchPanel` 支持 **`embedded`**，在 **`App`** 中覆盖左侧 **TodoSidebar**；顶栏「搜索」做开关并高亮激活态；筛选区 **max-height** + 主体 **flex-1**，扩大结果列表区域；界面移除命中率四格与「按月命中」块（导出简报仍含统计字段，供后续「统计」视图复用）；结果行仅 **标题** + **日期/时间**（`formatSearchResultDateTime`）。
+- **顶栏日历 Popover**：宽度 `min(16rem, calc(100vw-2rem))`，`--cell-size` 按容器自适应；`month_caption` **pointer-events** 与导航 **z-index**，避免遮挡翻月按钮；日按钮 **flex** 居中。
 - **版本对齐**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`app` 包）均为 **0.2.5**；发布安装包与 Git 标签请使用 **`v0.2.5`**（见 `.cursorrules`）。
 
 ## v0.2.4

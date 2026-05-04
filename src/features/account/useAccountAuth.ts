@@ -10,13 +10,26 @@ import {
 import { signInWithCustomTicketIfPresent, signOutCloudbaseAuth } from './cloudbase';
 import * as api from './authApi';
 
+/** 旧版本曾把 token/邮箱写入 localStorage；启动时清除，避免遗留凭证 */
+function purgeLegacyAccountAuthFromLocalStorage(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(ACCOUNT_TOKEN_KEY);
+    window.localStorage.removeItem(ACCOUNT_EMAIL_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 function readStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
+  purgeLegacyAccountAuthFromLocalStorage();
   return sessionStorage.getItem(ACCOUNT_TOKEN_KEY);
 }
 
 function readStoredEmail(): string | null {
   if (typeof window === 'undefined') return null;
+  purgeLegacyAccountAuthFromLocalStorage();
   const raw = sessionStorage.getItem(ACCOUNT_EMAIL_KEY);
   if (!raw) return null;
   const v = raw.trim().toLowerCase();
@@ -57,8 +70,12 @@ export function useAccountAuth() {
   const persistBusinessToken = useCallback((token: string | null) => {
     setBusinessToken(token);
     if (typeof window === 'undefined') return;
-    if (token) sessionStorage.setItem(ACCOUNT_TOKEN_KEY, token);
-    else sessionStorage.removeItem(ACCOUNT_TOKEN_KEY);
+    try {
+      if (token) sessionStorage.setItem(ACCOUNT_TOKEN_KEY, token);
+      else sessionStorage.removeItem(ACCOUNT_TOKEN_KEY);
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   const sendCode = useCallback(async (email: string) => {

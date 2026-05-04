@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, ChevronDown, Search, Sun, Moon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Search, Sun, Moon, CalendarDays } from 'lucide-react';
 import TodoSidebar from '@/components/TodoSidebar';
 import CalendarGrid from '@/components/CalendarGrid';
 import WeekView from '@/components/WeekView';
@@ -16,6 +16,7 @@ import {
   teamBaseVersionStorageKey,
   teamFirstPullDoneKey,
 } from '@/features/account/config';
+import { hasSessionBusinessAuth } from '@/features/account/sessionAuthGate';
 import type { ViewType, CalendarEvent, TodoItem, TodoCategory, TodoScopeType } from '@/types';
 import { getMonthDays, getWeekDays } from '@/lib/calendar-utils';
 import { resolveTodoScopeType } from '@/lib/todoScope';
@@ -31,6 +32,9 @@ import {
 } from '@/lib/teamCollab';
 import { useEventReminders } from '@/features/notifications/useEventReminders';
 import { useAppTheme } from '@/features/theme/useAppTheme';
+import { Calendar as PickDateCalendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { zhCN } from 'date-fns/locale';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import './App.css';
 
@@ -572,6 +576,8 @@ export default function App() {
     deviceId,
     accountEmail,
   } = useSharedAccountAuth();
+  /** 首屏已在 useState 注入本地快照时跳过「再从磁盘灌入」，仅在本次会话内由未登录变为已登录时灌入 */
+  const vaultHydrateSkippedRef = useRef(hasSessionBusinessAuth());
   const autoPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [workspaceMode, setWorkspaceMode] = useState<'personal' | 'team'>(() => readWorkspaceMode());
   const [activeTeamId, setActiveTeamId] = useState<string | null>(() => readActiveTeamId());
@@ -637,12 +643,14 @@ export default function App() {
       window.localStorage.setItem(teamBaseVersionStorageKey(teamId), String(v));
     }
   }, []);
-  const [persisted] = useState<PersistedData | null>(() => loadPersistedData());
-  const initialTodos = normalizeTodoColorsByCategory(persisted?.todos ?? defaultTodos);
-  const initialEvents = normalizeEventColorsBySourceTodo(persisted?.events ?? defaultEvents, initialTodos);
+  const [persisted] = useState<PersistedData | null>(() =>
+    hasSessionBusinessAuth() ? loadPersistedData() : null
+  );
+  const initialTodos = normalizeTodoColorsByCategory(persisted?.todos ?? []);
+  const initialEvents = normalizeEventColorsBySourceTodo(persisted?.events ?? [], initialTodos);
   const [currentDate, setCurrentDate] = useState(
-    persisted?.currentDate ? new Date(persisted.currentDate) : new Date(2024, 9, 15)
-  ); // Oct 15, 2024
+    persisted?.currentDate ? new Date(persisted.currentDate) : new Date()
+  );
   const [viewType, setViewType] = useState<ViewType>(persisted?.viewType ?? 'month');
   const [todos, setTodos] = useState<TodoItem[]>(() => initialTodos);
   const [todoTombstones, setTodoTombstones] = useState<Record<string, number>>(persisted?.todoTombstones ?? {});
@@ -656,6 +664,9 @@ export default function App() {
   );
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [showYearPicker, setShowYearPicker] = useState(false);
+  const [showJumpCalendar, setShowJumpCalendar] = useState(false);
+  const [jumpCalendarDate, setJumpCalendarDate] = useState<Date>(() => new Date());
+  const [jumpCalendarMonth, setJumpCalendarMonth] = useState<Date>(() => new Date());
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const showGlobalSearchRef = useRef(false);
   useEffect(() => {
@@ -685,6 +696,36 @@ export default function App() {
   const [noteMergeHint, setNoteMergeHint] = useState('');
   const draggedTodoRef = useRef<TodoItem | null>(null);
 
+  /** 未持有会话 token：不展示本地保险库数据，并强制回到个人工作区（协作身份依赖登录） */
+  useEffect(() => {
+    if (businessToken) return;
+    vaultHydrateSkippedRef.current = false;
+    setTodos([]);
+    setTodoTombstones({});
+    setEvents([]);
+    setEventTombstones({});
+    setNotesByDate({});
+    setNoteOwnerByDate({});
+    setNoteMetaByDate({});
+    setNoteTombstonesByDate({});
+    setCurrentDate(new Date());
+    setViewType('month');
+    setTodoMergeHint('');
+    setEventMergeHint('');
+    setNoteMergeHint('');
+    queueMicrotask(() => {
+      if (typeof window === 'undefined') return;
+      window.localStorage.setItem(WORKSPACE_MODE_KEY, 'personal');
+      window.localStorage.removeItem(ACTIVE_TEAM_ID_KEY);
+      setWorkspaceMode('personal');
+      setActiveTeamId(null);
+      setTeamBaseVersion(0);
+      setTeamPeerAccess('bothPush');
+      setTeamOwnerEmail(null);
+      teamServerBaselineRef.current = null;
+    });
+  }, [businessToken]);
+
   useEventReminders(events);
 
   const year = currentDate.getFullYear();
@@ -700,7 +741,7 @@ export default function App() {
   }, [events, todos, month]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !businessToken) return;
     const payload = createPersistedPayload(
       todos,
       todoTombstones,
@@ -714,7 +755,19 @@ export default function App() {
       noteTombstonesByDate
     );
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  }, [todos, todoTombstones, events, eventTombstones, currentDate, viewType, notesByDate, noteOwnerByDate, noteMetaByDate, noteTombstonesByDate]);
+  }, [
+    businessToken,
+    todos,
+    todoTombstones,
+    events,
+    eventTombstones,
+    currentDate,
+    viewType,
+    notesByDate,
+    noteOwnerByDate,
+    noteMetaByDate,
+    noteTombstonesByDate,
+  ]);
 
   const getAccountSnapshot = useCallback((): PersistedData => {
     return createPersistedPayload(
@@ -883,9 +936,18 @@ export default function App() {
   const handleToday = () => {
     setShowMonthPicker(false);
     setShowYearPicker(false);
+    setShowJumpCalendar(false);
     setCurrentDate(new Date());
     setViewType('today');
   };
+
+  const applyJumpCalendarDate = useCallback(() => {
+    setCurrentDate(new Date(jumpCalendarDate));
+    setViewType('today');
+    setShowJumpCalendar(false);
+    setShowMonthPicker(false);
+    setShowYearPicker(false);
+  }, [jumpCalendarDate]);
 
   const handleDragStart = useCallback((todo: TodoItem) => {
     draggedTodoRef.current = todo;
@@ -1086,6 +1148,7 @@ export default function App() {
   const handleMonthSelect = (selectedMonth: number) => {
     setCurrentDate(new Date(year, selectedMonth - 1, 1));
     setShowMonthPicker(false);
+    setShowJumpCalendar(false);
   };
 
   const handleYearSelect = (selectedYear: number) => {
@@ -1095,6 +1158,7 @@ export default function App() {
     if (d.getDate() > dim) d.setDate(dim);
     setCurrentDate(d);
     setShowYearPicker(false);
+    setShowJumpCalendar(false);
   };
 
   const handleDayCellClick = useCallback((dateStr: string) => {
@@ -1108,6 +1172,7 @@ export default function App() {
     setCurrentDate(new Date(y, m - 1, d));
     setViewType('today');
     setShowGlobalSearch(false);
+    setShowJumpCalendar(false);
   }, []);
 
   const handleAddSearchResultToTodayPlan = useCallback((title: string) => {
@@ -1249,6 +1314,10 @@ export default function App() {
   }, [todos, todoTombstones, events, eventTombstones, currentDate, viewType, notesByDate, noteOwnerByDate, noteMetaByDate, noteTombstonesByDate]);
 
   const handleImportData = useCallback(async (file: File) => {
+    if (!businessToken) {
+      window.alert('请先登录后再导入备份。');
+      return;
+    }
     try {
       const content = await file.text();
       const parsed = JSON.parse(content) as PersistedData;
@@ -1283,7 +1352,7 @@ export default function App() {
     } catch {
       window.alert('导入失败：无法解析文件。');
     }
-  }, []);
+  }, [businessToken]);
 
   const handleSaveNote = useCallback((dateKey: string, note: string) => {
     const normalizedMe = normCollabEmail(accountEmail);
@@ -1580,6 +1649,18 @@ export default function App() {
     setNoteMergeHint('');
   }, []);
 
+  /** 本次会话内刚完成登录：从磁盘载入保险库，便于随后云端拉取与本地合并 */
+  useEffect(() => {
+    if (!businessToken) return;
+    if (vaultHydrateSkippedRef.current) {
+      vaultHydrateSkippedRef.current = false;
+      return;
+    }
+    const disk = loadPersistedData();
+    if (!disk) return;
+    applyPersonalSnapshotReplace(disk);
+  }, [businessToken, applyPersonalSnapshotReplace]);
+
   const applyTeamCloudSnapshot = useCallback(
     (teamId: string, snapshot: unknown, version: number) => {
       updateTeamBaseVersion(teamId, version);
@@ -1850,6 +1931,7 @@ export default function App() {
                 onClick={() => {
                   setShowMonthPicker(!showMonthPicker);
                   setShowYearPicker(false);
+                  setShowJumpCalendar(false);
                 }}
                 className="flex items-center gap-1 text-xl font-semibold text-[var(--shell-text-strong)] hover:text-[var(--shell-accent)] transition-colors"
               >
@@ -1862,6 +1944,7 @@ export default function App() {
                 onClick={() => {
                   setShowYearPicker(!showYearPicker);
                   setShowMonthPicker(false);
+                  setShowJumpCalendar(false);
                 }}
                 className="flex items-center gap-1 text-xl font-semibold text-[var(--shell-text-strong)] hover:text-[var(--shell-accent)] transition-colors"
               >
@@ -1932,9 +2015,16 @@ export default function App() {
           </button>
           <button
             type="button"
-            onClick={() => setShowGlobalSearch(true)}
-            className="px-3 py-2 rounded-lg text-sm font-medium border border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] transition-colors duration-200 flex items-center gap-1"
-            title="全局搜索（Ctrl+K / ⌘K）"
+            onClick={() => setShowGlobalSearch((open) => !open)}
+            className={`
+              px-3 py-2 rounded-lg text-sm font-medium border transition-colors duration-200 flex items-center gap-1
+              ${
+                showGlobalSearch
+                  ? 'border-[var(--shell-accent)] text-[var(--shell-accent)] bg-[var(--shell-accent)]/10'
+                  : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
+              }
+            `}
+            title={showGlobalSearch ? '关闭搜索（Esc）' : '打开搜索，覆盖左侧任务栏（Ctrl+K / ⌘K）'}
           >
             <Search className="w-4 h-4" />
             搜索
@@ -1948,6 +2038,84 @@ export default function App() {
           {todoMergeHint ? <span className="text-xs text-[var(--shell-accent)]">{todoMergeHint}</span> : null}
           {eventMergeHint ? <span className="text-xs text-[var(--shell-accent)]">{eventMergeHint}</span> : null}
           {noteMergeHint ? <span className="text-xs text-[var(--shell-accent)]">{noteMergeHint}</span> : null}
+          <Popover
+            open={showJumpCalendar}
+            onOpenChange={(open) => {
+              setShowJumpCalendar(open);
+              if (open) {
+                const d = new Date(currentDate);
+                setJumpCalendarDate(d);
+                setJumpCalendarMonth(new Date(d.getFullYear(), d.getMonth(), 1));
+                setShowMonthPicker(false);
+                setShowYearPicker(false);
+              }
+            }}
+          >
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                title="选择日期，确定后进入当日「日历」视图（时间轴日视图）"
+                className={`
+                  inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-base font-semibold tracking-tight
+                  shadow-md transition-all duration-200 min-h-[44px]
+                  ${showJumpCalendar
+                    ? 'border-2 border-[var(--shell-accent)] bg-[var(--shell-accent)]/20 text-[var(--shell-text-strong)] ring-2 ring-[var(--shell-accent)]/30 ring-offset-2 ring-offset-[var(--shell-bg)]'
+                    : 'border-2 border-[var(--shell-accent)]/45 bg-gradient-to-b from-[var(--shell-panel)] to-[var(--shell-surface-hover)] text-[var(--shell-text-strong)] hover:border-[var(--shell-accent)] hover:shadow-lg hover:from-[var(--shell-surface-hover)]'
+                  }
+                `}
+              >
+                <CalendarDays className="w-5 h-5 shrink-0 text-[var(--shell-accent)]" strokeWidth={2.25} aria-hidden />
+                日历
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="end"
+              sideOffset={8}
+              className="w-[min(16rem,calc(100vw-2rem))] max-w-[calc(100vw-1.5rem)] p-4 bg-[var(--shell-panel)] border-[var(--shell-border-subtle)] text-[var(--shell-text-strong)] shadow-xl box-border"
+            >
+              <PickDateCalendar
+                mode="single"
+                locale={zhCN}
+                month={jumpCalendarMonth}
+                onMonthChange={setJumpCalendarMonth}
+                selected={jumpCalendarDate}
+                onSelect={(d) => {
+                  if (d) setJumpCalendarDate(d);
+                }}
+                className="w-full rounded-lg border-0 bg-transparent p-0 [--cell-size:min(2.35rem,calc((100%-0.75rem)/7))]"
+                classNames={{
+                  root: 'w-full',
+                  month: 'w-full gap-2',
+                  month_caption:
+                    'relative z-0 mb-2 flex h-10 w-full items-center justify-center pointer-events-none px-10',
+                  caption_label:
+                    'pointer-events-auto text-center text-sm font-semibold text-[var(--shell-text-strong)] sm:text-base',
+                  weekdays: 'mb-1.5 flex w-full gap-0.5',
+                  weekday:
+                    'flex-1 py-0.5 text-center text-[12px] font-semibold text-[var(--shell-subtle)] sm:text-[13px]',
+                  week: 'flex w-full gap-0.5',
+                  day: 'min-w-0 flex-1 flex items-center justify-center',
+                  table: 'w-full border-collapse border-spacing-0',
+                }}
+              />
+              <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-[var(--shell-border-subtle)]">
+                <button
+                  type="button"
+                  onClick={() => setShowJumpCalendar(false)}
+                  className="px-3 py-1.5 text-sm rounded-md border border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={applyJumpCalendarDate}
+                  className="px-3 py-1.5 text-sm rounded-md bg-[var(--shell-accent)] text-[var(--shell-accent-contrast)] font-medium hover:bg-[var(--shell-accent-hover)]"
+                >
+                  确定
+                </button>
+              </div>
+            </PopoverContent>
+          </Popover>
           <button
             type="button"
             onClick={handleToday}
@@ -1966,6 +2134,7 @@ export default function App() {
             onClick={() => {
               setShowMonthPicker(false);
               setShowYearPicker(false);
+              setShowJumpCalendar(false);
               setViewType('week');
             }}
             className={`
@@ -1983,6 +2152,7 @@ export default function App() {
             onClick={() => {
               setShowMonthPicker(false);
               setShowYearPicker(false);
+              setShowJumpCalendar(false);
               setViewType('month');
             }}
             className={`
@@ -2000,6 +2170,7 @@ export default function App() {
             onClick={() => {
               setShowMonthPicker(false);
               setShowYearPicker(false);
+              setShowJumpCalendar(false);
               setViewType('year');
             }}
             className={`
@@ -2017,63 +2188,87 @@ export default function App() {
 
       {/* Main Content */}
       <div className="flex-1 flex gap-6 min-h-0">
-        <TodoSidebar
-          todos={todos}
-          viewType={viewType}
-          currentDate={currentDate}
-          filteredTodos={filteredTodos}
-          onDragStart={handleDragStart}
-          onAddTodo={(text, category) =>
-            setTodos(prev => {
-              const currentDateKey = toDateKey(currentDate);
-              const currentWeekStart = getWeekDays(new Date(currentDate))[0].fullDate;
-              const scopeType: TodoScopeType =
-                viewType === 'today'
-                  ? 'day'
-                  : viewType === 'week'
-                    ? 'week'
-                    : viewType === 'year'
-                      ? 'year'
-                      : 'month';
-              const collab =
-                workspaceMode === 'team' && accountEmail ? normCollabEmail(accountEmail) : undefined;
+        <div className="relative h-full min-h-0 shrink-0">
+          <div
+            className={`h-full min-h-0 transition-opacity duration-150 ${showGlobalSearch ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
+            aria-hidden={showGlobalSearch}
+          >
+            <TodoSidebar
+              todos={todos}
+              viewType={viewType}
+              currentDate={currentDate}
+              filteredTodos={filteredTodos}
+              onDragStart={handleDragStart}
+              onAddTodo={(text, category) =>
+                setTodos((prev) => {
+                  const currentDateKey = toDateKey(currentDate);
+                  const currentWeekStart = getWeekDays(new Date(currentDate))[0].fullDate;
+                  const scopeType: TodoScopeType =
+                    viewType === 'today'
+                      ? 'day'
+                      : viewType === 'week'
+                        ? 'week'
+                        : viewType === 'year'
+                          ? 'year'
+                          : 'month';
+                  const collab =
+                    workspaceMode === 'team' && accountEmail ? normCollabEmail(accountEmail) : undefined;
 
-              return [
-                ...prev,
-                {
-                  id: Date.now().toString(),
-                  text,
-                  category,
-                  color: categoryColorMap[category],
-                  month,
-                  date: scopeType === 'day' ? currentDateKey : undefined,
-                  scopeType,
-                  scopeStart: scopeType === 'week' ? currentWeekStart : undefined,
-                  scopeYear: scopeType === 'month' || scopeType === 'year' ? year : undefined,
-                  count: null,
-                  updatedAt: Date.now(),
-                  ...(collab !== undefined ? { collabOwnerEmail: collab } : {}),
-                },
-              ];
-            })
-          }
-          onUpdateTodo={handleUpdateTodo}
-          onDeleteTodo={handleDeleteTodo}
-          onResetLocalData={handleResetLocalData}
-          onExportData={handleExportData}
-          onImportData={handleImportData}
-          onTestNotification={handleTestNotification}
-          noteDateKey={currentDateKey}
-          noteContent={notesByDate[currentDateKey] ?? ''}
-          noteOwnerEmail={currentNoteOwnerEmail || null}
-          isPeerNote={isPeerNoteForCurrentDate}
-          canEditPeerNote={canEditPeerNote}
-          onSaveNote={handleSaveNote}
-          workspaceMode={workspaceMode}
-          accountEmail={accountEmail}
-          teamOwnerEmail={teamOwnerEmail}
-          onOpenSettings={() => setShowAccountLogin(true)}
-        />
+                  return [
+                    ...prev,
+                    {
+                      id: Date.now().toString(),
+                      text,
+                      category,
+                      color: categoryColorMap[category],
+                      month,
+                      date: scopeType === 'day' ? currentDateKey : undefined,
+                      scopeType,
+                      scopeStart: scopeType === 'week' ? currentWeekStart : undefined,
+                      scopeYear: scopeType === 'month' || scopeType === 'year' ? year : undefined,
+                      count: null,
+                      updatedAt: Date.now(),
+                      ...(collab !== undefined ? { collabOwnerEmail: collab } : {}),
+                    },
+                  ];
+                })
+              }
+              onUpdateTodo={handleUpdateTodo}
+              onDeleteTodo={handleDeleteTodo}
+              onResetLocalData={handleResetLocalData}
+              onExportData={handleExportData}
+              onImportData={handleImportData}
+              onTestNotification={handleTestNotification}
+              noteDateKey={currentDateKey}
+              noteContent={notesByDate[currentDateKey] ?? ''}
+              noteOwnerEmail={currentNoteOwnerEmail || null}
+              isPeerNote={isPeerNoteForCurrentDate}
+              canEditPeerNote={canEditPeerNote}
+              onSaveNote={handleSaveNote}
+              workspaceMode={workspaceMode}
+              accountEmail={accountEmail}
+              teamOwnerEmail={teamOwnerEmail}
+              onOpenSettings={() => setShowAccountLogin(true)}
+            />
+          </div>
+          {showGlobalSearch ? (
+            <div className="absolute inset-0 z-30 flex min-h-0 flex-col">
+              <GlobalSearchPanel
+                embedded
+                events={events}
+                todos={todos}
+                notesByDate={notesByDate}
+                workspaceMode={workspaceMode}
+                accountEmail={accountEmail}
+                teamOwnerEmail={teamOwnerEmail}
+                noteOwnerByDate={noteOwnerByDate}
+                onClose={() => setShowGlobalSearch(false)}
+                onJumpToDate={handleSearchJumpToDate}
+                onAddToTodayPlan={handleAddSearchResultToTodayPlan}
+              />
+            </div>
+          ) : null}
+        </div>
 
         {viewType === 'month' && (
           <CalendarGrid
@@ -2136,6 +2331,7 @@ export default function App() {
             }}
           />
         )}
+
       </div>
 
       {/* Click outside to close month / year picker */}
@@ -2145,22 +2341,8 @@ export default function App() {
           onClick={() => {
             setShowMonthPicker(false);
             setShowYearPicker(false);
+            setShowJumpCalendar(false);
           }}
-        />
-      )}
-
-      {showGlobalSearch && (
-        <GlobalSearchPanel
-          events={events}
-          todos={todos}
-          notesByDate={notesByDate}
-          workspaceMode={workspaceMode}
-          accountEmail={accountEmail}
-          teamOwnerEmail={teamOwnerEmail}
-          noteOwnerByDate={noteOwnerByDate}
-          onClose={() => setShowGlobalSearch(false)}
-          onJumpToDate={handleSearchJumpToDate}
-          onAddToTodayPlan={handleAddSearchResultToTodayPlan}
         />
       )}
 

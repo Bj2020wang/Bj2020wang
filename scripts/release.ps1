@@ -38,14 +38,15 @@ function Ensure-TagMatchesHead([string]$ExpectedTag) {
 }
 
 function Build-Installer {
-  $env:CARGO_TARGET_DIR = "C:\Users\WANGJ\tauri-cargo-target\app"
+  # 短路径可降低 Windows 下 link.exe LNK1105/1224（文件被占用）概率；若失败可改回其它固定目录
+  $env:CARGO_TARGET_DIR = "C:\tbuild\app"
   $env:CARGO_BUILD_JOBS = "1"
   $env:RUSTFLAGS = "-C debuginfo=0"
   npx tauri build -b nsis
 }
 
 function Copy-Installer([string]$VersionText) {
-  $source = "C:\Users\WANGJ\tauri-cargo-target\app\release\bundle\nsis\Todo Calendar_${VersionText}_x64-setup.exe"
+  $source = "C:\tbuild\app\release\bundle\nsis\Todo Calendar_${VersionText}_x64-setup.exe"
   if (-not (Test-Path $source)) {
     throw "Installer not found: $source"
   }
