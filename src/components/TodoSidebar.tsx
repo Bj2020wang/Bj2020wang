@@ -3,6 +3,7 @@ import { Plus, Settings, Pencil, Trash2, Check, X, ThumbsUp } from 'lucide-react
 import type { TodoItem, ViewType, TodoCategory } from '@/types';
 import { isPeerTodoInTeam } from '@/lib/teamCollab';
 import { getWeekDays, formatDateKey } from '@/lib/calendar-utils';
+import { formatTodoScopeLabel } from '@/lib/todoScope';
 
 interface TodoSidebarProps {
   todos: TodoItem[];
@@ -124,7 +125,7 @@ export default function TodoSidebar({
   // Get subtitle based on view
   const getSubtitle = (): string => {
     if (viewType === 'year') {
-      return `${currentDate.getFullYear()}年待办（与日程落在该年的任务）`;
+      return `${currentDate.getFullYear()}年待办（当日 / 当周 / 当月 / 本年度任务）`;
     }
     if (viewType === 'month') {
       return `${currentDate.getMonth() + 1}月待办`;
@@ -373,9 +374,16 @@ export default function TodoSidebar({
                 </button>
               </div>
             ) : (
-              <span className={`text-[15px] leading-relaxed flex-1 ${canDrag || isEmptyCount ? 'text-[var(--shell-text-strong)]' : 'text-[var(--shell-subtle)] line-through'}`}>
-                {todo.text}
-              </span>
+              <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                <span className="text-[11px] text-[var(--shell-subtle)] tabular-nums leading-tight">
+                  {formatTodoScopeLabel(todo, currentDate)}
+                </span>
+                <span
+                  className={`text-[15px] leading-relaxed ${canDrag || isEmptyCount ? 'text-[var(--shell-text-strong)]' : 'text-[var(--shell-subtle)] line-through'}`}
+                >
+                  {todo.text}
+                </span>
+              </div>
             )}
             {/* Count badge */}
             <span className={`
@@ -417,7 +425,9 @@ export default function TodoSidebar({
 
       {/* Footer Tip */}
       <div className="mt-4 pt-4 border-t border-[var(--shell-border-subtle)]">
-        <p className="text-[13px] text-[var(--shell-subtle)]">按住圆点可拖动到右侧日历规划日程</p>
+        <p className="text-[13px] text-[var(--shell-subtle)]">
+          每条上方为所属时间范围；仅与当前视图时间段匹配的任务会列出（另有日历安排的也会显示）。按住圆点可拖到日历。
+        </p>
         <input
           ref={importInputRef}
           type="file"

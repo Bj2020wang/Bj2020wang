@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.5
+
+- **Todo 时间范围与侧栏筛选**：`TodoItem` 增加可选 **`scopeYear`**，`TodoScopeType` 含 **`year`**（年度视图下新建为年度任务）。**Today / Week / Month / Year** 切换时，侧栏仅列出与当前时间段匹配的任务（日历上在该时间段内有安排的仍会显示）。每条任务标题上方展示 **`formatTodoScopeLabel`**（`src/lib/todoScope.ts`）；拖拽单日任务改期时同步更新 `date` / `month` / `scopeYear`。默认示例数据补充 `scopeType` / `scopeYear` 以便对齐月历示例年。
+- **版本对齐**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`app` 包）均为 **0.2.5**；发布安装包与 Git 标签请使用 **`v0.2.5`**（见 `.cursorrules`）。
+
 ## v0.2.4
 
 - **年度视图**：顶栏在 Month 旁增加 **Year**，`ViewType` 含 `'year'`（`src/types/index.ts`）；`YearView.tsx` 按自然月汇总与日历区间相交的日程数与完成数，点击某月切换到当月 **Month** 视图（`App.tsx` 联动年份下拉与按年翻页）。

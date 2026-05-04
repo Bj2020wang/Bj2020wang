@@ -18,6 +18,7 @@ import {
 } from '@/features/account/config';
 import type { ViewType, CalendarEvent, TodoItem, TodoCategory, TodoScopeType } from '@/types';
 import { getMonthDays, getWeekDays } from '@/lib/calendar-utils';
+import { resolveTodoScopeType } from '@/lib/todoScope';
 import {
   buildWriteOwnTeamSnapshot,
   effectiveEventOwnerEmail,
@@ -35,13 +36,76 @@ import './App.css';
 
 // 2024年10月9日=周三, 10日=周四, 13日=周日
 const defaultTodos: TodoItem[] = [
-  { id: '1', text: '周三上午9点参加部门会议', color: '#F59E0B', category: 'work', month: 10, date: '2024-10-09', count: 1 },
-  { id: '2', text: '周四下午5点前往金融中心参加培训课程', color: '#8B5CF6', category: 'study', month: 10, date: '2024-10-10', count: 1 },
-  { id: '3', text: '购物清单：生日蛋糕、红酒、水果、百事可乐、牛排', color: '#FFFFFF', category: 'life', month: 10, count: 1 },
-  { id: '4', text: '周日上午10点飞机飞往上海出差', color: '#FFFFFF', category: 'work', month: 10, date: '2024-10-13', count: 1 },
-  { id: '5', text: '跑步3公里', color: '#10B981', category: 'health', month: 10, count: 5 },
-  { id: '6', text: '阅读30分钟', color: '#3B82F6', category: 'study', month: 10, count: 7 },
-  { id: '7', text: '喝水8杯', color: '#06B6D4', category: 'health', month: 10, count: 8 },
+  {
+    id: '1',
+    text: '周三上午9点参加部门会议',
+    color: '#F59E0B',
+    category: 'work',
+    month: 10,
+    date: '2024-10-09',
+        scopeType: 'day',
+        count: 1,
+  },
+  {
+    id: '2',
+    text: '周四下午5点前往金融中心参加培训课程',
+    color: '#8B5CF6',
+    category: 'study',
+    month: 10,
+    date: '2024-10-10',
+    scopeType: 'day',
+    count: 1,
+  },
+  {
+    id: '3',
+    text: '购物清单：生日蛋糕、红酒、水果、百事可乐、牛排',
+    color: '#FFFFFF',
+    category: 'life',
+    month: 10,
+    scopeType: 'month',
+    scopeYear: 2024,
+    count: 1,
+  },
+  {
+    id: '4',
+    text: '周日上午10点飞机飞往上海出差',
+    color: '#FFFFFF',
+    category: 'work',
+    month: 10,
+    date: '2024-10-13',
+    scopeType: 'day',
+    count: 1,
+  },
+  {
+    id: '5',
+    text: '跑步3公里',
+    color: '#10B981',
+    category: 'health',
+    month: 10,
+    scopeType: 'month',
+    scopeYear: 2024,
+    count: 5,
+  },
+  {
+    id: '6',
+    text: '阅读30分钟',
+    color: '#3B82F6',
+    category: 'study',
+    month: 10,
+    scopeType: 'month',
+    scopeYear: 2024,
+    count: 7,
+  },
+  {
+    id: '7',
+    text: '喝水8杯',
+    color: '#06B6D4',
+    category: 'health',
+    month: 10,
+    scopeType: 'month',
+    scopeYear: 2024,
+    count: 8,
+  },
 ];
 
 const defaultEvents: CalendarEvent[] = [
@@ -226,6 +290,7 @@ const TODO_COMPARE_FIELDS: Array<keyof TodoItem> = [
   'date',
   'scopeType',
   'scopeStart',
+  'scopeYear',
   'count',
   'collabOwnerEmail',
 ];
@@ -880,9 +945,18 @@ export default function App() {
       // If a day-scope todo is rescheduled by drag-and-drop, move its owner date
       // so it appears only in the target day list.
       if (todo.scopeType === 'day') {
+        const y = Number(dateStr.slice(0, 4));
         setTodos(prev =>
           prev.map(t =>
-            t.id === todo.id ? { ...t, date: dateStr, updatedAt: Date.now() } : t
+            t.id === todo.id
+              ? {
+                  ...t,
+                  date: dateStr,
+                  month: Number(dateStr.slice(5, 7)),
+                  scopeYear: Number.isFinite(y) ? y : t.scopeYear,
+                  updatedAt: Date.now(),
+                }
+              : t
           )
         );
       }
@@ -1340,13 +1414,6 @@ export default function App() {
     const isInRange = (startDate: string, endDate: string, rangeStart: string, rangeEnd: string) =>
       !(endDate < rangeStart || startDate > rangeEnd);
 
-    const resolveTodoScope = (todo: TodoItem): TodoScopeType => {
-      if (todo.scopeType) return todo.scopeType;
-      // Backward compatible fallback for old local data.
-      if (todo.date) return 'day';
-      return 'month';
-    };
-
     const getViewRange = () => {
       if (viewType === 'today') {
         const dayKey = toDateKey(currentDate);
@@ -1378,7 +1445,7 @@ export default function App() {
     );
 
     return todos.filter((todo) => {
-      const scopeType = resolveTodoScope(todo);
+      const scopeType = resolveTodoScopeType(todo);
       const byScope = (() => {
         if (scopeType === 'day') {
           return !!todo.date && todo.date >= start && todo.date <= end;
@@ -1389,8 +1456,19 @@ export default function App() {
           const weekEnd = addDays(weekStart, 6);
           return isInRange(weekStart, weekEnd, start, end);
         }
-        // month scope todos：仅在月视图按当月筛选；年视图侧栏不展开无年份的「月桶」任务（避免全年误列）
-        return viewType === 'month' && todo.month === month;
+        if (scopeType === 'year') {
+          return todo.scopeYear === year;
+        }
+        // month
+        const monthMatches = todo.month === month;
+        const yearMatches = todo.scopeYear === undefined || todo.scopeYear === year;
+        if (viewType === 'month') {
+          return monthMatches && yearMatches;
+        }
+        if (viewType === 'year') {
+          return todo.scopeYear === year;
+        }
+        return false;
       })();
 
       const byScheduledEvent = todosWithEventsInRange.has(todo.id);
@@ -1950,7 +2028,13 @@ export default function App() {
               const currentDateKey = toDateKey(currentDate);
               const currentWeekStart = getWeekDays(new Date(currentDate))[0].fullDate;
               const scopeType: TodoScopeType =
-                viewType === 'today' ? 'day' : viewType === 'week' ? 'week' : 'month';
+                viewType === 'today'
+                  ? 'day'
+                  : viewType === 'week'
+                    ? 'week'
+                    : viewType === 'year'
+                      ? 'year'
+                      : 'month';
               const collab =
                 workspaceMode === 'team' && accountEmail ? normCollabEmail(accountEmail) : undefined;
 
@@ -1965,6 +2049,7 @@ export default function App() {
                   date: scopeType === 'day' ? currentDateKey : undefined,
                   scopeType,
                   scopeStart: scopeType === 'week' ? currentWeekStart : undefined,
+                  scopeYear: scopeType === 'month' || scopeType === 'year' ? year : undefined,
                   count: null,
                   updatedAt: Date.now(),
                   ...(collab !== undefined ? { collabOwnerEmail: collab } : {}),

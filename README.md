@@ -1,8 +1,13 @@
 # Todo Calendar（待办日历）
 
-**当前版本：0.2.4**（与 `package.json`、`src-tauri/tauri.conf.json` 一致）
+**当前版本：0.2.5**（与 `package.json`、`src-tauri/tauri.conf.json` 一致）
 
 基于 **React + TypeScript + Vite** 的日历与待办应用，可选 **Tauri** 打包 Windows 安装包；云端使用 **腾讯云 CloudBase**（云函数 HTTP `newworld` + 文档数据库）。
+
+## 0.2.5 亮点（Todo 时间范围）
+
+- 侧栏任务带 **所属时间** 小标签；**日 / 周 / 月 / 年** 视图只显示与该时间段匹配的任务（另有日历安排的仍会显示）。
+- 支持 **年度范围** 类型任务；月度任务可锚定 **`scopeYear`**，避免跨历年混淆。
 
 ## 0.2.4 亮点（年度视图与搜索）
 

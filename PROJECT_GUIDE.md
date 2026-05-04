@@ -1,8 +1,8 @@
-# 项目说明与功能入口（v0.2.4）
+# 项目说明与功能入口（v0.2.5）
 
 这份文档给你做长期参考：帮助你快速知道“哪个文件负责什么、功能入口在哪、以后怎么加功能不混乱”。
 
-> **版本**：应用与安装包以 **`src-tauri/tauri.conf.json` 的 `version`** 为准（当前 **0.2.4**），并与 Git 标签 **`v0.2.4`** 对齐；详见 CHANGELOG 与 `.cursorrules` 发布约定。
+> **版本**：应用与安装包以 **`src-tauri/tauri.conf.json` 的 `version`** 为准（当前 **0.2.5**），并与 Git 标签 **`v0.2.5`** 对齐；详见 CHANGELOG 与 `.cursorrules` 发布约定。
 
 ## 1. 目录与文件职责（关键）
 
@@ -51,6 +51,9 @@
 - `src/lib/calendar-utils.ts`  
   日历工具函数：月天数、周天数、节假日、农历、事件分配。
 
+- `src/lib/todoScope.ts`  
+  Todo **时间范围**解析（`resolveTodoScopeType`）与侧栏 **标签文案**（`formatTodoScopeLabel`）。
+
 - `src/types/index.ts`  
   核心数据结构定义（Todo、CalendarEvent、ViewType、TodoCategory）。
 
@@ -70,6 +73,7 @@
   - `handleUpdateTodo(...)`
   - `handleDeleteTodo(...)`
   - `getFilteredTodos()`
+- **时间范围（scope）**：`TodoItem` 使用 `scopeType`（**`day` | `week` | `month` | `year`**）、`date`（日）、`scopeStart`（周起始日）、`scopeYear`（月 / 年锚定公历年）。新建任务时继承当前顶栏视图（Today → 日，Week → 周，Month → 月，Year → 年）。侧栏列表随视图切换过滤；**仍在当前时间段日历上有安排的**任务也会列出（与 `CalendarEvent.sourceTodoId` 联动）。标签展示见 `todoScope.ts`。
 
 ### 2.2 日历规划（拖拽到月/周/日/年）
 - 视图文件：

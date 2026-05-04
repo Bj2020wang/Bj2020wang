@@ -1,5 +1,5 @@
 export type TodoCategory = 'work' | 'life' | 'study' | 'health';
-export type TodoScopeType = 'day' | 'week' | 'month';
+export type TodoScopeType = 'day' | 'week' | 'month' | 'year';
 
 export interface TodoItem {
   id: string;
@@ -10,6 +10,8 @@ export interface TodoItem {
   date?: string;
   scopeType?: TodoScopeType;
   scopeStart?: string; // used for week-scope todos (week start date)
+  /** 月范围 / 年范围任务所属公历年；缺省时月任务仅在「月份数字」匹配各年（兼容旧数据） */
+  scopeYear?: number;
   count: number | null; // null means empty (not started yet)
   updatedAt?: number;
   /** 协作云：任务归属邮箱；未标时视为创建者 ownerEmail */
