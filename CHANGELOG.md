@@ -1,15 +1,19 @@
 # Changelog
 
+## v0.2.7
+
+- **Todo 侧栏**：分类 **`Select`（Radix）** 窄幅下拉；列表行**不显示次数徽章**（`count` 逻辑仍在 **`App.tsx`**）；完成圆圈 **`border-2`**。
+- **日历 Today**：无时刻任务与时间轴**共用纵向滚动**，便于任务多时拖到刻度。
+- **日历 Month**：月格子区域**纵向滚动**，避免末行日期被裁切。
+- **版本对齐**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（**`app`** 包）均为 **0.2.7**；发布安装包与 Git 标签请使用 **`v0.2.7`**（见 `.cursorrules`）。
+
 ## v0.2.6
 
-- **Todo 侧栏**：分类改用 **`Select`（Radix）** 窄幅下拉；列表行**不再显示次数徽章**（`count` 逻辑不变）；完成圆圈 **`border-2`**。
-- **日历 Today**：无时刻任务与时间轴**同一滚动容器**，避免任务过多时无法滚到刻度拖拽。
-- **日历 Month**：月格子区域可**纵向滚动**，避免末行日期被裁切。
 - **移动端待办底栏日期行**：待办 Tab 底部在 **Today / Week / Month / Year** 分段下方增加与日历顶栏一致的 **`headerLabel` + 左右切换**；月 / 年视图支持下拉；箭头与日期间距与日历顶栏一致，整组居中。详见 `PROJECT_GUIDE.md` §2.14。
 - **移动端点「Today」**：分段选择 **`today`** 时同步 **`setCurrentDate(new Date())`**，日历 / 统计 / 待办三处一致回到当天。
 - **PWA（最快上架移动端）**：集成 **`vite-plugin-pwa`**（`manifest.webmanifest` + **Service Worker** 预缓存）；`public/` 提供 **`apple-touch-icon.png`**（180）、**`pwa-192.png`** / **`pwa-512.png`**；`index.html` 补充 **iOS 主屏幕** meta。部署须 **HTTPS**（或本机 `localhost`）；详见 `PROJECT_GUIDE.md` §2.13。
 - **统计概览联动**：`StatisticsOverviewPanel` 与顶栏 **Today / Week / Month / Year** 及 **`currentDate`** 对齐；**待办总数**、**分类分布**使用侧栏 **`filteredTodos`**；日程统计与 **`getCalendarViewRange`**（`src/lib/viewRange.ts`，与 **`App.tsx` 中 `getFilteredTodos`** 共用）区间一致；趋势图为 **单日 / 自然周七日 / 本月每日（可横向滚动）/ 本年按月**（详见 `PROJECT_GUIDE.md` §2.11）。
-- **版本对齐**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`app` 包）均为 **0.2.6**；发布安装包与 Git 标签请使用 **`v0.2.6`**（见 `.cursorrules`）。
+- **版本对齐**：该版本发布时 `package` / Tauri / Cargo 均为 **0.2.6**；Git 标签 **`v0.2.6`**。
 
 ## v0.2.5
 
