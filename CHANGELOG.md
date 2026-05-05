@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.8
+
+- **账号 / HTTP**：`getAccountHttpOrigin` 对 `VITE_ACCOUNT_HTTP_BASE` **自动补 `https://`**；未配置时默认预付网关与 **v0.2.5 安装包**一致；`authApi` 区分 **CloudBase 鉴权**与 **业务网关** 失败环节；`desktopFetchHint` 补充控制台「跨域设置 / 添加跨域域名」与文档「跨域校验」对应说明及迟到邮件现象说明。
+- **云函数 `newworld`**：对 HTTP 访问返回 **CORS** 响应头并处理 **`OPTIONS`** 预检，便于手机局域网访问时浏览器读到 JSON。
+- **登录 UX**：`App` 在 **`visibilitychange` / `pageshow`** 下恢复打开设置；未登录时持久化「设置曾打开 / 邮箱草稿」至 **`sessionStorage`**（见 `config.ts` 键名）；`AccountLoginModal` 回填邮箱并发码成功后清理草稿。
+- **版本对齐**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（**`app`** 包）均为 **0.2.8**；发布安装包与 Git 标签请使用 **`v0.2.8`**（见 `.cursorrules`）。
+
 ## v0.2.7
 
 - **Todo 侧栏**：分类 **`Select`（Radix）** 窄幅下拉；列表行**不显示次数徽章**（`count` 逻辑仍在 **`App.tsx`**）；完成圆圈 **`border-2`**。

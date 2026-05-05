@@ -63,10 +63,64 @@ async function ensureSnapshotDbAuthUid(email) {
   }
 }
 
+/** 当前 HTTP 触发事件，用于附加 CORS 响应头（若网关已注入同名头，以网关为准） */
+var __corsEvent = null;
+
+function getHttpMethod(ev) {
+  if (!ev || typeof ev !== 'object') return '';
+  var m =
+    ev.httpMethod ||
+    (ev.requestContext && ev.requestContext.http && ev.requestContext.http.method) ||
+    (ev.requestContext && ev.requestContext.httpMethod) ||
+    ev.method ||
+    '';
+  return String(m).toUpperCase();
+}
+
+function getHttpHeader(ev, name) {
+  var h = ev && ev.headers;
+  if (!h || typeof h !== 'object') return '';
+  var want = String(name).toLowerCase();
+  for (var k in h) {
+    if (!Object.prototype.hasOwnProperty.call(h, k)) continue;
+    if (String(k).toLowerCase() === want) return String(h[k] == null ? '' : h[k]);
+  }
+  return '';
+}
+
+/**
+ * 浏览器 fetch 业务网关时的跨域响应头。
+ * 控制台新版常见「跨域设置 / 添加跨域域名」对应文档中的跨域校验与白名单；若网关仍未带回 CORS，则由函数兜底。
+ * @see https://docs.cloudbase.net/service/cors
+ */
+function corsHeadersFor(ev) {
+  var origin = getHttpHeader(ev, 'origin');
+  var h = {
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept',
+    'Access-Control-Max-Age': '3600',
+  };
+  if (origin) {
+    h['Access-Control-Allow-Origin'] = origin;
+  } else {
+    h['Access-Control-Allow-Origin'] = '*';
+  }
+  return h;
+}
+
+function httpOptionsResponse(ev) {
+  return {
+    statusCode: 204,
+    headers: corsHeadersFor(ev),
+    body: '',
+  };
+}
+
 function jsonResponse(statusCode, bodyObj) {
+  var cors = corsHeadersFor(__corsEvent);
   return {
     statusCode,
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    headers: Object.assign({}, cors, { 'Content-Type': 'application/json; charset=utf-8' }),
     body: JSON.stringify(bodyObj),
   };
 }
@@ -200,20 +254,27 @@ function snapshotForStore(raw) {
 }
 
 exports.main = async function (event) {
-  const req = parseRequest(event);
-  if (req === null) {
-    return fail(400, 400, '请求体不是合法 JSON');
-  }
-
-  const action = req.action;
-  const payload = req.payload || {};
-
-  if (!action) {
-    return fail(400, 400, 'action is required');
-  }
-
+  __corsEvent = event;
   try {
-    switch (action) {
+    var httpMethod = getHttpMethod(event);
+    if (httpMethod === 'OPTIONS') {
+      return httpOptionsResponse(event);
+    }
+
+    const req = parseRequest(event);
+    if (req === null) {
+      return fail(400, 400, '请求体不是合法 JSON');
+    }
+
+    const action = req.action;
+    const payload = req.payload || {};
+
+    if (!action) {
+      return fail(400, 400, 'action is required');
+    }
+
+    try {
+      switch (action) {
       case 'send-code':
         return await handleSendCode(payload);
       case 'verify-code':
@@ -260,6 +321,9 @@ exports.main = async function (event) {
       500,
       hint ? '服务异常：' + hint + '（亦可查看云函数 newworld 运行日志）' : '服务器繁忙，请稍后重试'
     );
+  }
+  } finally {
+    __corsEvent = null;
   }
 };
 

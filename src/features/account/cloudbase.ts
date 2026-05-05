@@ -1,6 +1,6 @@
 import cloudbase from '@cloudbase/js-sdk';
 import { CLOUDBASE_ENV_ID, CLOUDBASE_PUBLISHABLE_KEY, CLOUDBASE_REGION } from './config';
-import { throwIfTauriFetchLikelySecurityDomain } from './desktopFetchHint';
+import { rethrowAccountNetworkError } from './desktopFetchHint';
 import { syncDebugInfo, syncDebugWarn } from './syncDebug';
 
 type CloudbaseApp = ReturnType<typeof cloudbase.init>;
@@ -56,8 +56,7 @@ export async function ensureAnonymousSignIn(): Promise<void> {
     if (loginState) return;
     await auth.signInAnonymously();
   } catch (e) {
-    throwIfTauriFetchLikelySecurityDomain(e);
-    throw e;
+    rethrowAccountNetworkError(e);
   }
 }
 

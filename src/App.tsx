@@ -19,6 +19,12 @@ import YearView from '@/components/YearView';
 import GlobalSearchPanel from '@/features/search/GlobalSearchPanel';
 import StatisticsOverviewPanel from '@/features/stats/StatisticsOverviewPanel';
 import AccountLoginModal from '@/features/account/AccountLoginModal';
+import {
+  ACCOUNT_LOGIN_DRAFT_EMAIL_KEY,
+  ACCOUNT_SETTINGS_RESUME_OPEN_KEY,
+  ACCOUNT_VERIFICATION_EMAIL_KEY,
+  ACCOUNT_VERIFICATION_ID_KEY,
+} from '@/features/account/config';
 import { useSharedAccountAuth } from '@/features/account/useSharedAccountAuth';
 import * as authApi from '@/features/account/authApi';
 import { AccountSyncConflictError } from '@/features/account/authApi';
@@ -747,6 +753,69 @@ export default function App() {
   }, []);
 
   const [showAccountLogin, setShowAccountLogin] = useState(false);
+
+  const openAccountSettings = useCallback(() => {
+    try {
+      sessionStorage.setItem(ACCOUNT_SETTINGS_RESUME_OPEN_KEY, '1');
+    } catch {
+      /* ignore */
+    }
+    setShowAccountLogin(true);
+  }, []);
+
+  const closeAccountSettings = useCallback(() => {
+    setShowAccountLogin(false);
+    try {
+      const vid = sessionStorage.getItem(ACCOUNT_VERIFICATION_ID_KEY);
+      if (!vid) {
+        sessionStorage.removeItem(ACCOUNT_SETTINGS_RESUME_OPEN_KEY);
+        sessionStorage.removeItem(ACCOUNT_LOGIN_DRAFT_EMAIL_KEY);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  /** 切到邮箱等 App 再回来时：若未完成登录但本会话曾打开设置或已发过验证码，自动回到设置登录页 */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const tryResume = () => {
+      if (hasSessionBusinessAuth()) return;
+      try {
+        const resume =
+          sessionStorage.getItem(ACCOUNT_SETTINGS_RESUME_OPEN_KEY) === '1' ||
+          !!(
+            sessionStorage.getItem(ACCOUNT_VERIFICATION_ID_KEY) &&
+            sessionStorage.getItem(ACCOUNT_VERIFICATION_EMAIL_KEY)
+          );
+        if (resume) {
+          setShowAccountLogin(true);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    tryResume();
+    const onVis = () => {
+      if (document.visibilityState === 'visible') tryResume();
+    };
+    window.addEventListener('pageshow', tryResume);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('pageshow', tryResume);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!businessToken) return;
+    try {
+      sessionStorage.removeItem(ACCOUNT_SETTINGS_RESUME_OPEN_KEY);
+      sessionStorage.removeItem(ACCOUNT_LOGIN_DRAFT_EMAIL_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, [businessToken]);
   const [accountSyncRuntime, setAccountSyncRuntime] = useState<string>('未登录');
   const [todoMergeHint, setTodoMergeHint] = useState('');
   const [eventMergeHint, setEventMergeHint] = useState('');
@@ -1105,7 +1174,6 @@ export default function App() {
 
       const id = `${Date.now()}`;
       const navDateKey = toDateKey(currentDate);
-      const navWeekStart = getWeekDays(new Date(currentDate))[0].fullDate;
       const scopeTypeFromView: TodoScopeType =
         viewType === 'today'
           ? 'day'
@@ -2310,7 +2378,7 @@ export default function App() {
                       workspaceMode={workspaceMode}
                       accountEmail={accountEmail}
                       teamOwnerEmail={teamOwnerEmail}
-                      onOpenSettings={() => setShowAccountLogin(true)}
+                      onOpenSettings={openAccountSettings}
                       appTheme={theme}
                       onToggleAppTheme={toggleTheme}
                     />
@@ -2867,7 +2935,7 @@ export default function App() {
               workspaceMode={workspaceMode}
               accountEmail={accountEmail}
               teamOwnerEmail={teamOwnerEmail}
-              onOpenSettings={() => setShowAccountLogin(true)}
+              onOpenSettings={openAccountSettings}
             />
           </div>
           {effectiveShowGlobalSearch ? (
@@ -2979,7 +3047,7 @@ export default function App() {
 
       <AccountLoginModal
         open={showAccountLogin}
-        onClose={() => setShowAccountLogin(false)}
+        onClose={closeAccountSettings}
         onPullSnapshot={applyAccountSnapshot}
         onPushSnapshot={getTeamPushSnapshot}
         onRuntimeStatusChange={setAccountSyncRuntime}

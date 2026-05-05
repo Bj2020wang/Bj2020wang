@@ -1,15 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ThumbsUp, X } from 'lucide-react';
 import * as authApi from './authApi';
 import { AccountSyncConflictError } from './authApi';
 import type { SnapshotHistoryItem, TeamPeerAccess } from './authApi';
 import { normalizeTeamPeerAccess } from '@/lib/teamCollab';
-import { TEAM_AUTO_BIDIR_ENABLED_KEY, teamFirstPullDoneKey } from './config';
+import {
+  ACCOUNT_LOGIN_DRAFT_EMAIL_KEY,
+  ACCOUNT_VERIFICATION_EMAIL_KEY,
+  TEAM_AUTO_BIDIR_ENABLED_KEY,
+  teamFirstPullDoneKey,
+} from './config';
 import { useSharedAccountAuth } from './useSharedAccountAuth';
 import { watchUserSnapshotByEmail } from './userSnapshotDb';
 import type { UserSnapshotDocPayload } from './userSnapshotDb';
 import { syncDebugInfo, syncDebugWarn } from './syncDebug';
-import { formatAccountFetchErrorMessage } from './desktopFetchHint';
+import { formatAccountFetchErrorMessage, getLanOrRemoteOriginLoginTip } from './desktopFetchHint';
 
 const AUTO_PUSH_IDLE_MS = 30_000;
 const AUTO_PUSH_INTERVAL_MS = 60_000;
@@ -166,6 +171,7 @@ export default function AccountLoginModal({
   const lastSyncActionAtRef = useRef(0);
   const lastReportedRuntimeRef = useRef<string>('');
   const runtimePhaseRef = useRef<'未登录' | '同步中' | '空闲'>('未登录');
+  const lanOriginLoginTip = useMemo(() => getLanOrRemoteOriginLoginTip(), []);
   const baseVersionRef = useRef(baseVersion);
   const teamBaseVersionRef = useRef(teamBaseVersion);
   const pullSnapshotRef = useRef(pullSnapshot);
@@ -205,6 +211,32 @@ export default function AccountLoginModal({
   useEffect(() => {
     if (!open) setLogoutChoiceOpen(false);
   }, [open]);
+
+  const persistLoginDraftEmail = useCallback((raw: string) => {
+    if (typeof window === 'undefined') return;
+    try {
+      const t = raw.trim().toLowerCase();
+      if (t) sessionStorage.setItem(ACCOUNT_LOGIN_DRAFT_EMAIL_KEY, t);
+      else sessionStorage.removeItem(ACCOUNT_LOGIN_DRAFT_EMAIL_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  /** 切到邮箱 App 再回来时恢复邮箱输入（发码后亦有 ACCOUNT_VERIFICATION_EMAIL_KEY） */
+  useEffect(() => {
+    if (!open || businessToken) return;
+    try {
+      const fromVid = sessionStorage.getItem(ACCOUNT_VERIFICATION_EMAIL_KEY)?.trim();
+      const draft = sessionStorage.getItem(ACCOUNT_LOGIN_DRAFT_EMAIL_KEY)?.trim();
+      const next = fromVid || draft || '';
+      if (next) {
+        setEmail((prev) => (prev.trim() ? prev : next));
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [open, businessToken]);
 
   useEffect(() => {
     if (!open) return;
@@ -1012,6 +1044,11 @@ export default function AccountLoginModal({
     setBusy(true);
     try {
       await sendCode(email);
+      try {
+        sessionStorage.removeItem(ACCOUNT_LOGIN_DRAFT_EMAIL_KEY);
+      } catch {
+        /* ignore */
+      }
     } catch (e) {
       setError(formatAccountFetchErrorMessage(e));
     } finally {
@@ -1437,12 +1474,21 @@ export default function AccountLoginModal({
                 </div>
               ) : (
                 <>
+                  {lanOriginLoginTip ? (
+                    <div className="rounded-lg border border-amber-600/45 bg-amber-950/35 px-3 py-2 text-xs leading-snug text-amber-100 whitespace-pre-wrap">
+                      {lanOriginLoginTip}
+                    </div>
+                  ) : null}
                   <label className="block text-xs font-medium text-[var(--shell-text-muted)]">
                     邮箱
                     <input
                       type="email"
                       value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setEmail(v);
+                        persistLoginDraftEmail(v);
+                      }}
                       className="mt-1 w-full rounded-lg border border-[var(--shell-border)] bg-[var(--shell-elevated)] px-3 py-2 text-sm text-[var(--shell-text-strong)] outline-none focus:border-[var(--shell-accent)]"
                       placeholder="you@example.com"
                       autoComplete="email"

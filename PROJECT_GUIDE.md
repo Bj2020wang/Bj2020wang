@@ -1,8 +1,8 @@
-# 项目说明与功能入口（v0.2.7）
+# 项目说明与功能入口（v0.2.8）
 
 这份文档给你做长期参考：帮助你快速知道“哪个文件负责什么、功能入口在哪、以后怎么加功能不混乱”。
 
-> **版本**：应用与安装包以 **`src-tauri/tauri.conf.json` 的 `version`** 为准（当前 **0.2.7**），并与 Git 标签 **`v0.2.7`** 对齐；详见 CHANGELOG 与 `.cursorrules` 发布约定。
+> **版本**：应用与安装包以 **`src-tauri/tauri.conf.json` 的 `version`** 为准（当前 **0.2.8**），并与 Git 标签 **`v0.2.8`** 对齐；详见 CHANGELOG 与 `.cursorrules` 发布约定。
 
 ## 1. 目录与文件职责（关键）
 
@@ -264,7 +264,12 @@
 - **云函数代码**：与仓库 `cloudfunctions/newworld/` 保持一致并重新发布。  
 - **HTTP 路由**：生产环境建议重新开启「身份认证」，并确认前端请求已带 `Authorization: Bearer <CloudBase 访问令牌>`（当前前端 `authApi.ts` 已按此方式调用）。  
 - **安全域名**：继续只保留可信域名。  
-  - **重要（Tauri 桌面安装包）**：`npm run dev` 时页面来源是 `http://localhost:1420`，打包后 Windows 上多为 **`http://tauri.localhost`** 或 **`https://tauri.localhost`**（少数环境为 `tauri://localhost`）。若控制台「Web 安全域名」只配置了 localhost:1420，安装包里发码 / 匿名登录会出现 **`Failed to fetch`**。请在 CloudBase → 环境 → **安全配置** → **Web 安全域名** 中追加上述 `tauri.localhost` / `tauri://localhost` 条目（与开发用域名并存即可），保存后重开应用再试。  
+  - **重要（Tauri 桌面安装包）**：`npm run dev` 时页面来源是 `http://localhost:1420`，打包后 Windows 上多为 **`http://tauri.localhost`** 或 **`https://tauri.localhost`**（少数环境为 `tauri://localhost`）。若控制台「Web 安全域名」只配置了 localhost:1420，安装包里发码 / 匿名登录会出现 **`Failed to fetch`**。请在 CloudBase → 环境 → **安全配置** → **Web 安全域名** 中追加上述 `tauri.localhost` / `tauri://localhost` 条目（与开发用域名并存即可），保存后重开应用再试。
+  - **重要（手机 / 局域网访问 PWA 或 `npm run dev -- --host`）**：用手机访问 `http://电脑局域网IP:端口`（如 `http://172.20.10.3:3000`）时，必须在同一「Web 安全域名」列表里**新增这一条**；仅配置 `http://localhost:3000` **不会**放行 IP 访问。
+  - **白名单写法（易踩坑）**：部分控制台输入框**禁止带协议**，应填 `172.20.10.3:3000`；若你只加了 `http://172.20.10.3:3000` 仍 `Load failed`，请**再追加一条**「去掉 `http://`」的写法。须与「浏览器实际发出的 `Origin`」一致（含端口）。控制台入口示例：`https://tcb.cloud.tencent.com/dev?#/env/safety-source`。
+  - **HTTP 访问服务与跨域**：建议在控制台对 HTTP 访问路由**开启跨域校验**，由网关按 Web 安全域名自动添加 CORS 响应头；若关闭跨域校验，须在云函数内自行返回 `Access-Control-Allow-*`，否则浏览器仍可能报 `Load failed`。说明见 CloudBase 文档「跨域校验」：`https://docs.cloudbase.net/service/cors`。
+  - **环境变量**：**`VITE_ACCOUNT_HTTP_BASE`** 可选；未配置时使用与本仓库 **v0.2.x 安装包相同**的默认预付型 HTTP 网关（避免控制台「短环境 ID」与真实 HTTP 子域不一致导致本地 **404**）。若你使用其它 CloudBase 环境，必须在 `.env` 填写控制台「HTTP 访问服务」显示的 **`VITE_ACCOUNT_HTTP_BASE`**。
+  - **HTTP 路由路径**：代码默认请求 **`/test`**（`ACCOUNT_HTTP_PATH`），须与 CloudBase **HTTP 访问服务**里绑定 `newworld` 云函数的路径一致；若控制台为其它路径，在 `.env` 设置 **`VITE_ACCOUNT_HTTP_PATH`**。若接口返回 **「服务器返回的不是 JSON」**，多为路径或域名指错、网关返回了 HTML 错误页；新版错误信息会附带 HTTP 状态与响应片段便于核对。  
 - **数据库权限**：`email_codes` / `user_tokens` 等集合仅允许云函数访问，勿对前端直连开放写权限。  
 - **`user_snapshots`（前端可直连时）**：建议 `read` / `write` 均为 `doc.dbAuthUid == auth.uid`；文档需带 `dbAuthUid`（云函数在验码 / 拉取 / 推送时会补齐）。自定义登录私钥见云函数环境变量 `TCB_CUSTOM_LOGIN_PRIVATE_KEY` / `TCB_CUSTOM_LOGIN_PRIVATE_KEY_ID`。
 

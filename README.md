@@ -1,8 +1,14 @@
 # Todo Calendar（待办日历）
 
-**当前版本：0.2.7**（与 `package.json`、`src-tauri/tauri.conf.json` 一致）
+**当前版本：0.2.8**（与 `package.json`、`src-tauri/tauri.conf.json` 一致）
 
 基于 **React + TypeScript + Vite** 的日历与待办应用，可选 **Tauri** 打包 Windows 安装包；云端使用 **腾讯云 CloudBase**（云函数 HTTP `newworld` + 文档数据库）。
+
+## 0.2.8 亮点（账号 / 移动端登录）
+
+- **HTTP 网关**：`VITE_ACCOUNT_HTTP_BASE` 无 `https://` 时自动补全；默认预付网关与旧版安装包对齐；错误提示区分 CloudBase 鉴权与业务网关环节。
+- **云函数 `newworld`**：响应附带 **CORS**（含 **OPTIONS** 预检），缓解控制台「跨域设置」与浏览器读不到响应的问题。
+- **登录体验**：切到邮箱 App 再返回时，**自动回到设置登录页**并恢复邮箱草稿（会话级 `sessionStorage`）。
 
 ## 0.2.7 亮点（Todo 与日历可读性）
 

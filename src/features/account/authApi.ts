@@ -1,6 +1,6 @@
 import { getHttpAuthorizationToken } from './cloudbase';
-import { getAccountHttpUrl } from './config';
-import { throwIfTauriFetchLikelySecurityDomain } from './desktopFetchHint';
+import { ACCOUNT_HTTP_PATH, getAccountHttpUrl } from './config';
+import { rethrowAccountNetworkError } from './desktopFetchHint';
 
 export type AccountApiEnvelope<T = unknown> = {
   code: number;
@@ -39,7 +39,12 @@ export async function postAccountAction<T = unknown>(body: {
   action: string;
   payload?: Record<string, unknown>;
 }): Promise<AccountApiEnvelope<T>> {
-  const accessToken = await getHttpAuthorizationToken();
+  let accessToken: string;
+  try {
+    accessToken = await getHttpAuthorizationToken();
+  } catch (e) {
+    rethrowAccountNetworkError(e, 'cloudbase-auth');
+  }
   let res: Response;
   try {
     res = await fetch(getAccountHttpUrl(), {
@@ -52,15 +57,28 @@ export async function postAccountAction<T = unknown>(body: {
       body: JSON.stringify(body),
     });
   } catch (e) {
-    throwIfTauriFetchLikelySecurityDomain(e);
-    throw e;
+    rethrowAccountNetworkError(e, 'account-http-gateway');
   }
 
+  const contentType = res.headers.get('content-type') ?? '';
+  const rawText = await res.text();
   let json: AccountApiEnvelope<T>;
   try {
-    json = (await res.json()) as AccountApiEnvelope<T>;
+    json = JSON.parse(rawText) as AccountApiEnvelope<T>;
   } catch {
-    throw new Error('服务器返回非 JSON');
+    const preview = rawText.replace(/\s+/g, ' ').trim().slice(0, 320);
+    throw new Error(
+      [
+        '服务器返回的不是 JSON（常见：HTTP 路由未指向云函数，网关回了 HTML 404/错误页）。',
+        `请求地址：${getAccountHttpUrl()}（路径来自 ACCOUNT_HTTP_PATH=${ACCOUNT_HTTP_PATH}，可用环境变量 VITE_ACCOUNT_HTTP_PATH 覆盖）`,
+        `HTTP ${res.status}；Content-Type：${contentType || '（无）'}`,
+        preview
+          ? `响应片段：${preview}${rawText.length > preview.length ? '…' : ''}`
+          : '响应体为空。',
+        '',
+        '请到腾讯云控制台 → CloudBase → HTTP 访问服务：确认「默认域名 + 路由路径」绑定的云函数为 newworld，且路径与本应用一致；修改 .env 后需重启 npm run dev。',
+      ].join('\n')
+    );
   }
 
   if (!res.ok) {
