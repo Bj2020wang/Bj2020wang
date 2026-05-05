@@ -51,6 +51,12 @@
 
 详细架构、文件职责、功能入口与运维说明见 **[PROJECT_GUIDE.md](./PROJECT_GUIDE.md)**；版本变更见 **[CHANGELOG.md](./CHANGELOG.md)**。
 
+## PWA（iPhone / 安卓浏览器）
+
+- **构建**：`npm run build`，将 **`dist/`** 整包部署到 **HTTPS** 静态站点（需 SPA 回退到 `index.html`）。
+- **iPhone**：Safari → **分享** → **添加到主屏幕**。图标与 manifest 由 **`vite-plugin-pwa`** 与 **`public/`** 下 PNG 提供。
+- **详述**：`PROJECT_GUIDE.md` **§2.13**。
+
 ## 本地开发
 
 ```bash

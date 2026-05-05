@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { BookOpen, Briefcase, Dumbbell, Heart, Search, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, GripHorizontal, Search, X } from 'lucide-react';
 import type { CalendarEvent, TodoCategory, TodoItem } from '@/types';
 import { isPeerEventInTeam, isPeerTodoInTeam, normCollabEmail } from '@/lib/teamCollab';
 
@@ -49,7 +49,7 @@ interface SearchResultItem {
 }
 
 type CompletionFilter = 'all' | 'incomplete' | 'complete';
-/** 不限 | 按周（横向选周）| 按月（年 + 1–12 月）| 按年（选全年） */
+/** 不限 | 周（横向选周）| 月（年 + 1–12 月）| 年（选全年） */
 type DateFilterMode = 'all' | 'week' | 'month' | 'year';
 
 const WEEK_OFFSET_MIN = -26;
@@ -62,46 +62,15 @@ const CATEGORY_LABEL: Record<TodoCategory, string> = {
   health: '健康',
 };
 
-const KIND_LABEL: Record<SearchResultKind, string> = {
-  event: '日程',
-  todo: '任务',
-  note: '笔记',
-};
-
-const CATEGORY_STYLE: Record<
-  TodoCategory,
-  { label: string; icon: typeof Briefcase; chipClass: string }
-> = {
-  work: {
-    label: '工作',
-    icon: Briefcase,
-    chipClass: 'bg-rose-500/15 text-rose-200 border-rose-500/35',
-  },
-  life: {
-    label: '生活',
-    icon: Heart,
-    chipClass: 'bg-violet-500/15 text-violet-200 border-violet-500/35',
-  },
-  study: {
-    label: '学习',
-    icon: BookOpen,
-    chipClass: 'bg-sky-500/15 text-sky-200 border-sky-500/35',
-  },
-  health: {
-    label: '健康',
-    icon: Dumbbell,
-    chipClass: 'bg-emerald-500/15 text-emerald-200 border-emerald-500/35',
-  },
-};
-
-const SAVED_QUERIES_KEY = 'global-search-saved-queries-v1';
-const MAX_SAVED_QUERY_COUNT = 8;
-
 /** 筛选区 / 结果区分隔：可拖动调节高度（按嵌入 / 弹层分别记忆） */
 const FILTER_SPLIT_STORAGE_KEY = 'global-search-filter-pane-px-v1';
 const FILTER_SPLIT_MIN_FILTER_PX = 100;
 const FILTER_SPLIT_MIN_RESULTS_PX = 88;
-const FILTER_SPLITTER_HIT_PX = 12;
+/** 桌面弹层：细条即可；embedded（移动端整页搜索）需留出布局占位 */
+const FILTER_SPLITTER_HIT_PX_DESKTOP = 12;
+const FILTER_SPLITTER_HIT_PX_EMBEDDED = 52;
+/** 移动端嵌入搜索：两侧按钮单次调节幅度（px） */
+const EMBEDDED_SPLIT_NUDGE_PX = 56;
 
 function loadFilterPaneHeight(embedded: boolean): number {
   const fallback = embedded ? 168 : 224;
@@ -127,41 +96,6 @@ function saveFilterPaneHeight(embedded: boolean, px: number) {
   } catch {
     /* ignore */
   }
-}
-
-function loadQueryStats(): Record<string, number> {
-  try {
-    const raw = window.localStorage.getItem(SAVED_QUERIES_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as unknown;
-
-    if (Array.isArray(parsed)) {
-      return parsed.reduce<Record<string, number>>((acc, item) => {
-        if (typeof item === 'string' && item.trim()) {
-          acc[item.trim()] = 1;
-        }
-        return acc;
-      }, {});
-    }
-
-    if (parsed && typeof parsed === 'object') {
-      const obj = parsed as Record<string, unknown>;
-      const normalized: Record<string, number> = {};
-      for (const [key, value] of Object.entries(obj)) {
-        if (!key.trim()) continue;
-        const count = Number(value);
-        normalized[key] = Number.isFinite(count) && count > 0 ? Math.floor(count) : 1;
-      }
-      return normalized;
-    }
-    return {};
-  } catch {
-    return {};
-  }
-}
-
-function persistQueryStats(stats: Record<string, number>) {
-  window.localStorage.setItem(SAVED_QUERIES_KEY, JSON.stringify(stats));
 }
 
 function escapeRegExp(input: string): string {
@@ -318,7 +252,6 @@ export default function GlobalSearchPanel({
   const [includeTodos, setIncludeTodos] = useState(true);
   const [includeNotes, setIncludeNotes] = useState(true);
   const [todoCategoryFilter, setTodoCategoryFilter] = useState<'all' | TodoCategory>('all');
-  const [queryStats, setQueryStats] = useState<Record<string, number>>(() => loadQueryStats());
   const [filterPaneHeightPx, setFilterPaneHeightPx] = useState(() => loadFilterPaneHeight(embedded));
 
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -327,6 +260,8 @@ export default function GlobalSearchPanel({
   const monthStripRef = useRef<HTMLDivElement>(null);
   const monthYearStripRef = useRef<HTMLDivElement>(null);
   const yearStripRef = useRef<HTMLDivElement>(null);
+
+  const splitterHitPx = embedded ? FILTER_SPLITTER_HIT_PX_EMBEDDED : FILTER_SPLITTER_HIT_PX_DESKTOP;
 
   const rangeBounds = useMemo(
     () => computeSearchRangeBounds(dateFilterMode, weekOffset, monthPicker, yearPicker),
@@ -382,7 +317,7 @@ export default function GlobalSearchPanel({
       const total = root.getBoundingClientRect().height;
       const maxFilter = Math.max(
         FILTER_SPLIT_MIN_FILTER_PX,
-        total - FILTER_SPLIT_MIN_RESULTS_PX - FILTER_SPLITTER_HIT_PX
+        total - FILTER_SPLIT_MIN_RESULTS_PX - splitterHitPx
       );
       setFilterPaneHeightPx((h) =>
         Math.min(Math.max(h, FILTER_SPLIT_MIN_FILTER_PX), maxFilter)
@@ -392,7 +327,7 @@ export default function GlobalSearchPanel({
     ro.observe(root);
     clamp();
     return () => ro.disconnect();
-  }, []);
+  }, [splitterHitPx]);
 
   useEffect(() => {
     if (dateFilterMode !== 'week' || !weekStripRef.current) return;
@@ -564,50 +499,6 @@ export default function GlobalSearchPanel({
     collabResultScope,
   ]);
 
-  const kindCounts = useMemo(() => {
-    let event = 0;
-    let todo = 0;
-    let note = 0;
-    for (const r of results) {
-      if (r.kind === 'event') event += 1;
-      else if (r.kind === 'todo') todo += 1;
-      else note += 1;
-    }
-    return { event, todo, note };
-  }, [results]);
-
-  const resultStats = useMemo(() => {
-    const schedulable = results.filter((item) => item.kind !== 'note');
-    const total = schedulable.length;
-    const incomplete = schedulable.filter((item) => !item.completed).length;
-    const withTime = schedulable.filter((item) => !!item.time).length;
-    const completed = total - incomplete;
-    const completionRate = total === 0 ? 0 : Math.round((completed / total) * 100);
-    return { total: results.length, schedulableTotal: total, incomplete, withTime, completionRate, notes: kindCounts.note };
-  }, [results, kindCounts.note]);
-
-  const monthlyDistribution = useMemo(() => {
-    const monthCountMap: Record<string, number> = {};
-    for (const item of results) {
-      if (!item.date) continue;
-      const monthKey = item.date.slice(0, 7);
-      monthCountMap[monthKey] = (monthCountMap[monthKey] ?? 0) + 1;
-    }
-    return Object.entries(monthCountMap)
-      .sort((a, b) => b[0].localeCompare(a[0]))
-      .slice(0, 6);
-  }, [results]);
-
-  const topQueries = useMemo(() => {
-    return Object.entries(queryStats)
-      .sort((a, b) => {
-        if (b[1] !== a[1]) return b[1] - a[1];
-        return a[0].localeCompare(b[0], 'zh-CN');
-      })
-      .slice(0, MAX_SAVED_QUERY_COUNT)
-      .map(([query]) => query);
-  }, [queryStats]);
-
   useEffect(() => {
     const id = window.requestAnimationFrame(() => {
       searchInputRef.current?.focus();
@@ -615,141 +506,16 @@ export default function GlobalSearchPanel({
     return () => cancelAnimationFrame(id);
   }, []);
 
-  useEffect(() => {
-    const q = keyword.trim();
-    if (!q) return;
-
-    const timer = window.setTimeout(() => {
-      setQueryStats((prev) => {
-        const next: Record<string, number> = { ...prev, [q]: (prev[q] ?? 0) + 1 };
-        persistQueryStats(next);
-        return next;
-      });
-    }, 800);
-
-    return () => window.clearTimeout(timer);
-  }, [keyword]);
-
-  const completionLabel =
-    completionFilter === 'all' ? '全部' : completionFilter === 'incomplete' ? '未完成' : '已完成';
-
-  const handleExportCsv = () => {
-    if (!keyword.trim() || results.length === 0) {
-      window.alert('当前没有可导出的搜索结果，请先输入关键词并确保有命中结果。');
-      return;
-    }
-
-    const escapeCsv = (value: string) => {
-      const escaped = value.replace(/"/g, '""');
-      return `"${escaped}"`;
-    };
-
-    const now = new Date();
-    const exportTime = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
-    const currentKeyword = keyword.trim();
-
-    const rows = [
-      ['类型', '标题', '日期', '时间', '完成状态', '关键词', '导出时间'],
-      ...results.map((item) => [
-        KIND_LABEL[item.kind],
-        item.title,
-        item.date ?? '—',
-        item.time ?? '—',
-        item.kind === 'note' ? '—' : item.completed ? '已完成' : '未完成',
-        currentKeyword,
-        exportTime,
-      ]),
-    ];
-    const csvContent = rows.map((row) => row.map((cell) => escapeCsv(cell)).join(',')).join('\n');
-
-    const blob = new Blob([`\uFEFF${csvContent}`], { type: 'text/csv;charset=utf-8;' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    const stamp = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}-${pad2(now.getHours())}${pad2(now.getMinutes())}`;
-    link.href = url;
-    link.download = `global-search-${stamp}.csv`;
-    link.click();
-    window.URL.revokeObjectURL(url);
-  };
-
-  const handleExportBriefTxt = () => {
-    const q = keyword.trim();
-    if (!q || results.length === 0) {
-      window.alert('当前没有可导出的简报内容，请先输入关键词并确保有命中结果。');
-      return;
-    }
-
-    const now = new Date();
-    const exportTime = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
-    const monthlyText = monthlyDistribution.length
-      ? monthlyDistribution.map(([month, count]) => `${month}: ${count}`).join('\n')
-      : '暂无';
-    const detailsText = results
-      .map(
-        (item, index) =>
-          `${index + 1}. [${KIND_LABEL[item.kind]}] ${item.date ?? '未排期'} ${item.time ?? ''} | ${item.title} | ${
-            item.kind === 'note' ? '笔记' : item.completed ? '已完成' : '未完成'
-          }`
-      )
-      .join('\n');
-
-    const brief = [
-      `关键词查询简报`,
-      `查询关键词：${q}`,
-      `导出时间：${exportTime}`,
-      `完成状态（日程/任务）：${completionLabel}`,
-      `日期范围：${dateFilterSummary}`,
-      `类型：日程${includeEvents ? '✓' : '×'} 任务${includeTodos ? '✓' : '×'} 笔记${includeNotes ? '✓' : '×'}`,
-      `任务分类：${todoCategoryFilter === 'all' ? '全部' : CATEGORY_LABEL[todoCategoryFilter]}`,
-      ...(showCollabSearchFilters
-        ? [`协作结果：${collabResultScope === 'mine' ? '只看我的' : '含队友'}`]
-        : []),
-      ``,
-      `一、命中分布`,
-      `- 日程：${kindCounts.event} · 任务：${kindCounts.todo} · 笔记：${kindCounts.note}`,
-      ``,
-      `二、日程/任务统计`,
-      `- 日程+任务条数：${resultStats.schedulableTotal}`,
-      `- 未完成：${resultStats.incomplete}`,
-      `- 完成率：${resultStats.completionRate}%`,
-      `- 有具体时间：${resultStats.withTime}`,
-      ``,
-      `三、按月命中分布（最近 6 个月）`,
-      monthlyText,
-      ``,
-      `四、结果明细（按时间倒序）`,
-      detailsText,
-      ``,
-    ].join('\n');
-
-    const blob = new Blob([`\uFEFF${brief}`], { type: 'text/plain;charset=utf-8;' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    const stamp = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}-${pad2(now.getHours())}${pad2(now.getMinutes())}`;
-    link.href = url;
-    link.download = `global-search-brief-${stamp}.txt`;
-    link.click();
-    window.URL.revokeObjectURL(url);
-  };
-
-  const handleRemoveQuery = (query: string) => {
-    setQueryStats((prev) => {
-      const next = { ...prev };
-      delete next[query];
-      persistQueryStats(next);
-      return next;
-    });
-  };
-
-  const handleClearQueries = () => {
-    const confirmed = window.confirm('确定清空所有常用关键词吗？');
-    if (!confirmed) return;
-    setQueryStats({});
-    persistQueryStats({});
-  };
-
   const chipBtn = (active: boolean) =>
-    `px-3 py-1.5 text-xs font-medium rounded-full border transition-colors ${
+    `rounded-full border px-3 py-1.5 text-sm font-medium transition-colors md:text-xs ${
+      active
+        ? 'border-2 border-[var(--shell-accent)] text-[var(--shell-accent)] bg-[var(--shell-accent)]/12'
+        : 'border border-[var(--shell-border-subtle)] text-[var(--shell-text-muted)] bg-[var(--shell-input-deep)]/80 hover:bg-[var(--shell-surface-hover)] hover:border-[var(--shell-border)]'
+    }`;
+
+  /** 任务分类：更窄的内边距，便于一行排布（窄屏可横滑） */
+  const categoryChipBtn = (active: boolean) =>
+    `shrink-0 whitespace-nowrap rounded-full border px-2 py-1 text-xs font-medium transition-colors md:px-2.5 md:text-xs ${
       active
         ? 'border-2 border-[var(--shell-accent)] text-[var(--shell-accent)] bg-[var(--shell-accent)]/12'
         : 'border border-[var(--shell-border-subtle)] text-[var(--shell-text-muted)] bg-[var(--shell-input-deep)]/80 hover:bg-[var(--shell-surface-hover)] hover:border-[var(--shell-border)]'
@@ -772,47 +538,60 @@ export default function GlobalSearchPanel({
   };
 
   const stripChip = (active: boolean) =>
-    `shrink-0 snap-center whitespace-nowrap px-3 py-1.5 text-xs font-medium rounded-full border transition-colors ${
+    `shrink-0 snap-center whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-medium transition-colors md:text-xs ${
       active
         ? 'border-2 border-[var(--shell-accent)] text-[var(--shell-accent)] bg-[var(--shell-accent)]/12'
         : 'border border-[var(--shell-border-subtle)] text-[var(--shell-text-muted)] bg-[var(--shell-input-deep)]/80 hover:bg-[var(--shell-surface-hover)]'
     }`;
 
-  const handleSplitMouseDown = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if (e.button !== 0) return;
+  const handleSplitPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!e.isPrimary) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
       e.preventDefault();
+      const target = e.currentTarget;
+      target.setPointerCapture(e.pointerId);
+
       const root = splitRootRef.current;
       if (!root) return;
       const startY = e.clientY;
       const startH = filterPaneHeightPx;
       let currentH = startH;
 
-      const onMove = (ev: MouseEvent) => {
+      const maxFilterForTotal = (total: number) =>
+        Math.max(FILTER_SPLIT_MIN_FILTER_PX, total - FILTER_SPLIT_MIN_RESULTS_PX - splitterHitPx);
+
+      const onMove = (ev: PointerEvent) => {
         const total = root.getBoundingClientRect().height;
-        const maxFilter = Math.max(
-          FILTER_SPLIT_MIN_FILTER_PX,
-          total - FILTER_SPLIT_MIN_RESULTS_PX - FILTER_SPLITTER_HIT_PX
-        );
+        const maxFilter = maxFilterForTotal(total);
         const dy = ev.clientY - startY;
         currentH = Math.min(maxFilter, Math.max(FILTER_SPLIT_MIN_FILTER_PX, startH + dy));
         setFilterPaneHeightPx(currentH);
       };
 
-      const onUp = () => {
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
+      const finish = (ev: PointerEvent) => {
+        try {
+          target.releasePointerCapture(ev.pointerId);
+        } catch {
+          /* released */
+        }
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', finish);
+        document.removeEventListener('pointercancel', finish);
         document.body.style.removeProperty('cursor');
         document.body.style.removeProperty('user-select');
+        document.body.style.removeProperty('touch-action');
         saveFilterPaneHeight(embedded, currentH);
       };
 
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', finish);
+      document.addEventListener('pointercancel', finish);
       document.body.style.cursor = 'row-resize';
       document.body.style.userSelect = 'none';
+      document.body.style.touchAction = 'none';
     },
-    [embedded, filterPaneHeightPx]
+    [embedded, filterPaneHeightPx, splitterHitPx]
   );
 
   const nudgeFilterHeight = useCallback(
@@ -822,7 +601,7 @@ export default function GlobalSearchPanel({
       const total = root.getBoundingClientRect().height;
       const maxFilter = Math.max(
         FILTER_SPLIT_MIN_FILTER_PX,
-        total - FILTER_SPLIT_MIN_RESULTS_PX - FILTER_SPLITTER_HIT_PX
+        total - FILTER_SPLIT_MIN_RESULTS_PX - splitterHitPx
       );
       setFilterPaneHeightPx((h) => {
         const next = Math.min(maxFilter, Math.max(FILTER_SPLIT_MIN_FILTER_PX, h + delta));
@@ -830,7 +609,7 @@ export default function GlobalSearchPanel({
         return next;
       });
     },
-    [embedded]
+    [embedded, splitterHitPx]
   );
 
   const filterInnerClass = embedded
@@ -841,8 +620,8 @@ export default function GlobalSearchPanel({
     <SearchPanelShell embedded={embedded}>
         <div className="flex shrink-0 items-start justify-between px-5 pb-2 pt-5">
           <div>
-            <h2 className="text-2xl font-semibold tracking-tight text-[var(--shell-text-strong)]">搜索</h2>
-            <p className="mt-1 text-sm text-[var(--shell-text-muted)]">{searchContextLabel}</p>
+            <h2 className="text-3xl font-semibold tracking-tight text-[var(--shell-text-strong)] md:text-2xl">搜索</h2>
+            <p className="mt-1 text-base text-[var(--shell-text-muted)] md:text-sm">{searchContextLabel}</p>
           </div>
           <button
             type="button"
@@ -867,7 +646,7 @@ export default function GlobalSearchPanel({
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               placeholder={searchPlaceholder}
-              className="w-full rounded-2xl border border-[var(--shell-border-subtle)] bg-[var(--shell-bg)] py-3 pl-11 pr-4 text-sm text-[var(--shell-text-strong)] placeholder-[var(--shell-placeholder)] focus:border-[var(--shell-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--shell-accent)]/25"
+              className="w-full rounded-2xl border border-[var(--shell-border-subtle)] bg-[var(--shell-bg)] py-3 pl-11 pr-4 text-base text-[var(--shell-text-strong)] placeholder-[var(--shell-placeholder)] focus:border-[var(--shell-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--shell-accent)]/25 md:text-sm"
             />
           </div>
 
@@ -884,23 +663,23 @@ export default function GlobalSearchPanel({
             ))}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="shrink-0 text-[11px] text-[var(--shell-subtle)]">日期</span>
+          <div className="flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto pb-0.5 [-webkit-overflow-scrolling:touch] scrollbar-thin [scrollbar-color:rgba(128,128,128,0.35)_transparent]">
+            <span className="shrink-0 text-sm text-[var(--shell-subtle)]">日期</span>
             {(['all', 'week', 'month', 'year'] as const).map((key) => (
               <button
                 key={key}
                 type="button"
                 onClick={() => setDateMode(key)}
-                className={chipBtn(dateFilterMode === key)}
+                className={`shrink-0 whitespace-nowrap ${chipBtn(dateFilterMode === key)}`}
               >
-                {key === 'all' ? '不限' : key === 'week' ? '按周' : key === 'month' ? '按月' : '按年'}
+                {key === 'all' ? '不限' : key === 'week' ? '周' : key === 'month' ? '月' : '年'}
               </button>
             ))}
           </div>
 
           {dateFilterMode === 'week' && (
             <div className="space-y-1">
-              <div className="text-[11px] text-[var(--shell-subtle)]">选择一周（横向滑动）· 周一至周日</div>
+              <div className="text-sm text-[var(--shell-subtle)]">选择一周（横向滑动）· 周一至周日</div>
               <div ref={weekStripRef} className={scrollRowClass}>
                 {weekOffsetOptions.map((o) => (
                   <button
@@ -920,7 +699,7 @@ export default function GlobalSearchPanel({
           {dateFilterMode === 'month' && (
             <div className="space-y-2">
               <div className="space-y-1">
-                <div className="text-[11px] text-[var(--shell-subtle)]">年份（横向滑动）</div>
+                <div className="text-sm text-[var(--shell-subtle)]">年份（横向滑动）</div>
                 <div ref={monthYearStripRef} className={scrollRowClass}>
                   {yearOptions.map((y) => (
                     <button
@@ -936,7 +715,7 @@ export default function GlobalSearchPanel({
                 </div>
               </div>
               <div className="space-y-1">
-                <div className="text-[11px] text-[var(--shell-subtle)]">月份（1–12 月）</div>
+                <div className="text-sm text-[var(--shell-subtle)]">月份（1–12 月）</div>
                 <div ref={monthStripRef} className={scrollRowClass}>
                   {Array.from({ length: 12 }, (_, i) => i + 1).map((mo) => (
                     <button
@@ -956,7 +735,7 @@ export default function GlobalSearchPanel({
 
           {dateFilterMode === 'year' && (
             <div className="space-y-1">
-              <div className="text-[11px] text-[var(--shell-subtle)]">选择年份（横向滑动）</div>
+              <div className="text-sm text-[var(--shell-subtle)]">选择年份（横向滑动）</div>
               <div ref={yearStripRef} className={scrollRowClass}>
                 {yearOptions.map((y) => (
                   <button
@@ -974,7 +753,7 @@ export default function GlobalSearchPanel({
           )}
 
           <div className="flex flex-wrap items-center gap-2">
-            <span className="shrink-0 text-[11px] text-[var(--shell-subtle)]">类型</span>
+            <span className="shrink-0 text-sm text-[var(--shell-subtle)]">类型</span>
             <button type="button" onClick={() => setIncludeEvents((v) => !v)} className={chipBtn(includeEvents)}>
               日程
             </button>
@@ -988,7 +767,7 @@ export default function GlobalSearchPanel({
 
           {showCollabSearchFilters && (
             <div className="flex flex-wrap items-center gap-2">
-              <span className="shrink-0 text-[11px] text-[var(--shell-subtle)]">协作</span>
+              <span className="shrink-0 text-sm text-[var(--shell-subtle)]">协作</span>
               <button
                 type="button"
                 onClick={() => setCollabResultScope('all')}
@@ -1006,120 +785,107 @@ export default function GlobalSearchPanel({
             </div>
           )}
 
-          <div className="space-y-2">
-            <span className="text-[11px] text-[var(--shell-subtle)]">任务分类</span>
-            <div className="flex flex-wrap gap-2">
+          <div className="flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto pb-0.5 [-webkit-overflow-scrolling:touch] scrollbar-thin [scrollbar-color:rgba(128,128,128,0.35)_transparent]">
+            <span className="shrink-0 text-sm text-[var(--shell-subtle)]">任务</span>
+            <button
+              type="button"
+              onClick={() => setTodoCategoryFilter('all')}
+              className={categoryChipBtn(todoCategoryFilter === 'all')}
+            >
+              全部
+            </button>
+            {(Object.keys(CATEGORY_LABEL) as TodoCategory[]).map((cat) => (
               <button
+                key={cat}
                 type="button"
-                onClick={() => setTodoCategoryFilter('all')}
-                className={chipBtn(todoCategoryFilter === 'all')}
+                onClick={() => setTodoCategoryFilter(cat)}
+                className={categoryChipBtn(todoCategoryFilter === cat)}
               >
-                全部分类
+                {CATEGORY_LABEL[cat]}
               </button>
-              {(Object.keys(CATEGORY_LABEL) as TodoCategory[]).map((cat) => {
-                const meta = CATEGORY_STYLE[cat];
-                const Icon = meta.icon;
-                return (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setTodoCategoryFilter(cat)}
-                    className={`inline-flex items-center gap-1.5 ${chipBtn(todoCategoryFilter === cat)}`}
-                  >
-                    <Icon className="h-3.5 w-3.5 opacity-90" strokeWidth={2} aria-hidden />
-                    {meta.label}
-                  </button>
-                );
-              })}
-            </div>
+            ))}
           </div>
-
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={handleExportCsv}
-              className="rounded-full border border-[var(--shell-border-subtle)] px-3 py-2 text-xs text-[var(--shell-text-muted)] transition-colors hover:bg-[var(--shell-surface-hover)]"
-            >
-              导出 CSV
-            </button>
-            <button
-              type="button"
-              onClick={handleExportBriefTxt}
-              className="rounded-full border border-[var(--shell-border-subtle)] px-3 py-2 text-xs text-[var(--shell-text-muted)] transition-colors hover:bg-[var(--shell-surface-hover)]"
-            >
-              导出简报
-            </button>
-          </div>
-
-          {topQueries.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {topQueries.map((query) => (
-                <span
-                  key={query}
-                  className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border border-[var(--shell-border)] text-[var(--shell-text-muted)]"
-                >
-                  <button
-                    onClick={() => setKeyword(query)}
-                    className="hover:text-[var(--shell-text-strong)] transition-colors"
-                    title="点击搜索该关键词"
-                  >
-                    {query}
-                  </button>
-                  <button
-                    onClick={() => handleRemoveQuery(query)}
-                    className="text-[var(--shell-subtle)] hover:text-[#EF4444] transition-colors"
-                    title="删除该关键词"
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-              <button
-                onClick={handleClearQueries}
-                className="px-2 py-1 text-xs rounded-md border border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)] transition-colors"
-              >
-                清空常用
-              </button>
-            </div>
-          )}
         </div>
 
-        <div
-          role="separator"
-          aria-orientation="horizontal"
-          aria-valuemin={FILTER_SPLIT_MIN_FILTER_PX}
-          aria-valuemax={900}
-          aria-valuenow={Math.round(filterPaneHeightPx)}
-          tabIndex={0}
-          aria-label="拖动调节筛选区与结果区高度，上下方向键微调"
-          className="group relative z-10 flex shrink-0 cursor-row-resize items-center justify-center border-y border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] outline-none hover:bg-[var(--shell-surface-hover)] focus-visible:ring-2 focus-visible:ring-[var(--shell-accent)]/35"
-          style={{ height: FILTER_SPLITTER_HIT_PX }}
-          onMouseDown={handleSplitMouseDown}
-          onKeyDown={(e) => {
-            if (e.key === 'ArrowUp') {
-              e.preventDefault();
-              nudgeFilterHeight(-12);
-            } else if (e.key === 'ArrowDown') {
-              e.preventDefault();
-              nudgeFilterHeight(12);
-            }
-          }}
-        >
-          <span
-            className="pointer-events-none h-1 w-12 rounded-full bg-[var(--shell-border-subtle)] opacity-70 transition-opacity group-hover:opacity-100"
-            aria-hidden
-          />
-        </div>
+        {embedded ? (
+          <div
+            role="group"
+            tabIndex={0}
+            aria-label={`筛选区高度约 ${Math.round(filterPaneHeightPx)} 像素；两侧按钮大步调整，中间横条可拖动`}
+            className="relative z-10 flex shrink-0 items-center gap-2 border-y border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] px-2 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-[var(--shell-accent)]/35"
+            style={{ minHeight: splitterHitPx }}
+            onKeyDown={(e) => {
+              const step = 28;
+              if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                nudgeFilterHeight(step);
+              } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                nudgeFilterHeight(-step);
+              }
+            }}
+          >
+            <button
+              type="button"
+              className="touch-manipulation flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)] text-[var(--shell-text-muted)] transition-colors active:bg-[var(--shell-surface-hover)]"
+              aria-label="扩大下方结果列表区域"
+              onClick={() => nudgeFilterHeight(-EMBEDDED_SPLIT_NUDGE_PX)}
+            >
+              <ChevronDown className="h-7 w-7" strokeWidth={2} aria-hidden />
+            </button>
+            <div
+              className="flex h-[22px] min-h-[22px] min-w-0 flex-1 cursor-grab touch-none items-center justify-center self-center rounded-lg bg-[var(--shell-surface-hover)]/40 py-0 active:cursor-grabbing active:bg-[var(--shell-surface-hover)]/65"
+              onPointerDown={handleSplitPointerDown}
+            >
+              <GripHorizontal className="h-4 w-10 text-[var(--shell-subtle)]" strokeWidth={2} aria-hidden />
+            </div>
+            <button
+              type="button"
+              className="touch-manipulation flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)] text-[var(--shell-text-muted)] transition-colors active:bg-[var(--shell-surface-hover)]"
+              aria-label="扩大上方筛选条件区域"
+              onClick={() => nudgeFilterHeight(EMBEDDED_SPLIT_NUDGE_PX)}
+            >
+              <ChevronUp className="h-7 w-7" strokeWidth={2} aria-hidden />
+            </button>
+          </div>
+        ) : (
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            aria-valuemin={FILTER_SPLIT_MIN_FILTER_PX}
+            aria-valuemax={900}
+            aria-valuenow={Math.round(filterPaneHeightPx)}
+            tabIndex={0}
+            aria-label="拖动调节筛选区与结果区高度，上下方向键微调"
+            className="group relative z-10 flex shrink-0 cursor-row-resize items-center justify-center border-y border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] outline-none hover:bg-[var(--shell-surface-hover)] focus-visible:ring-2 focus-visible:ring-[var(--shell-accent)]/35"
+            style={{ height: splitterHitPx }}
+            onPointerDown={handleSplitPointerDown}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                nudgeFilterHeight(-12);
+              } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                nudgeFilterHeight(12);
+              }
+            }}
+          >
+            <span
+              className="pointer-events-none h-1 w-12 rounded-full bg-[var(--shell-border-subtle)] opacity-70 transition-opacity group-hover:opacity-100"
+              aria-hidden
+            />
+          </div>
+        )}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-2">
           {!keyword.trim() && (
-            <p className="py-10 text-center text-sm text-[var(--shell-subtle)]">输入关键词搜索日程、任务与笔记</p>
+            <p className="py-10 text-center text-base text-[var(--shell-subtle)] md:text-sm">输入关键词搜索日程、任务与笔记</p>
           )}
           {!!keyword.trim() && results.length === 0 && (
-            <p className="py-10 text-center text-sm text-[var(--shell-subtle)]">没有命中结果，试试别的关键词或筛选</p>
+            <p className="py-10 text-center text-base text-[var(--shell-subtle)] md:text-sm">没有命中结果，试试别的关键词或筛选</p>
           )}
           {!!keyword.trim() && results.length > 0 && (
-            <p className="mb-3 text-sm font-medium text-[var(--shell-text-strong)]">找到 {results.length} 个结果</p>
+            <p className="mb-3 text-base font-medium text-[var(--shell-text-strong)] md:text-sm">找到 {results.length} 个结果</p>
           )}
           <div className="space-y-2">
             {results.map((item) => (
@@ -1134,10 +900,10 @@ export default function GlobalSearchPanel({
                   item.date ? 'hover:border-[var(--shell-accent)]/40 hover:bg-[var(--shell-list-hover)]' : 'cursor-not-allowed opacity-60'
                 }`}
               >
-                <span className="min-w-0 flex-1 truncate text-sm font-medium leading-snug text-[var(--shell-text-strong)]">
+                <span className="min-w-0 flex-1 truncate text-base font-medium leading-snug text-[var(--shell-text-strong)] md:text-sm">
                   {renderHighlightedTitle(item.title)}
                 </span>
-                <span className="shrink-0 tabular-nums text-xs text-[var(--shell-text-muted)]">
+                <span className="shrink-0 tabular-nums text-sm text-[var(--shell-text-muted)] md:text-xs">
                   {formatSearchResultDateTime(item)}
                 </span>
               </button>

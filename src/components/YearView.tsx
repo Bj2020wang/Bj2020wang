@@ -35,13 +35,13 @@ export default function YearView({ year, events, onPickMonth }: YearViewProps) {
   return (
     <div className="flex-1 min-h-0 flex flex-col rounded-xl border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] p-4 overflow-hidden">
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3 shrink-0">
-        <h2 className="text-lg font-semibold text-[var(--shell-text-strong)]">{year}年 日程概览</h2>
-        <p className="text-xs text-[var(--shell-text-muted)]">
+        <h2 className="text-xl font-semibold text-[var(--shell-text-strong)] md:text-lg">{year}年 日程概览</h2>
+        <p className="text-sm text-[var(--shell-text-muted)] md:text-xs">
           全年日程 {yearTotal} 条 · 已完成 {yearDone}
           {yearTotal > 0 ? `（${Math.round((yearDone / yearTotal) * 100)}%）` : ''}
         </p>
       </div>
-      <p className="text-[11px] text-[var(--shell-subtle)] mb-3 shrink-0">
+      <p className="mb-3 shrink-0 text-sm text-[var(--shell-subtle)] md:text-xs">
         点击某个月进入月视图；后续可在此扩展「任务清单」年度统计。
       </p>
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 min-h-0 overflow-y-auto">
@@ -52,8 +52,8 @@ export default function YearView({ year, events, onPickMonth }: YearViewProps) {
             onClick={() => onPickMonth(m)}
             className="text-left rounded-lg border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)] px-3 py-2.5 hover:bg-[var(--shell-list-hover)] hover:border-[var(--shell-accent)]/40 transition-colors"
           >
-            <div className="text-sm font-medium text-[var(--shell-text-strong)]">{label}</div>
-            <div className="text-xs text-[var(--shell-text-muted)] mt-1">
+            <div className="text-base font-medium text-[var(--shell-text-strong)] md:text-sm">{label}</div>
+            <div className="mt-1 text-sm text-[var(--shell-text-muted)] md:text-xs">
               日程 {total} 条
               {total > 0 ? ` · 完成 ${done}` : ''}
             </div>

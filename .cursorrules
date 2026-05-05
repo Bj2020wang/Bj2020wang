@@ -144,3 +144,12 @@
      - `git config --add remote.origin.pushurl https://github.com/Bj2020wang/Bj2020wang.git`（若上一步把 GitHub 从 push 列表挤掉，用此补回；以 `git remote -v` 确认 `origin` 下有两条 push）
      - 或退而求其次：依次执行 `git push origin <branch>` 与 `git push gitee <branch>`（及各自的 `--tags`）。
    - **AI 协助推送时**：优先使用 **`git push origin …`**（覆盖双远端）；若用户环境只有单 push，则分别 `origin` + `gitee`。若某一远端因网络失败，须明确告知哪一侧成功、哪一侧待重试。
+
+13. **UI / 布局改动默认仅移动端（除非特别声明）**  
+   - 用户未写明「桌面」「桌面端」「PC」「两边」「全端」等时，**一律视为只改移动端**（PWA / 窄屏 / `isMobileLayout` / `layout === 'mobile'` 等分支）。  
+   - **桌面端布局与交互保持不动**；若组件与桌面共用（如 `DayView`、`CalendarGrid`），须拆成按布局分支渲染或新增仅移动端使用的封装，避免默认改掉桌面。  
+   - 实现或复述方案时，可主动写一句「本次仅移动端」，减少误解。
+
+14. **Todo「无时刻」默认归属日（导航日 · 产品约定）**  
+   - 用户新建任务时若**未选择日期时间**（无定时、无日程时刻），任务的归属日与关联「无明确时间」日程的日期必须基于 **`currentDate`（当前日历导航日）**，例如 `toDateKey(currentDate)`；**禁止**用系统真实「今天」`new Date()` / `todayKey` 作为该路径的默认日期。  
+   - 用户已自选日期或时刻的路径不受影响；若另有「日期无效时的回退」等行为，须在方案里单独说明是用导航日还是今日，避免静默混用。

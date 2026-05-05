@@ -33,6 +33,12 @@
 - `src/components/TodoSidebar.tsx`  
   左侧 Todo 清单区域：新增/编辑/删除、分类筛选、笔记输入、导入导出入口按钮。
 
+- `src/components/MobileBottomNav.tsx`  
+  窄屏底栏主 Tab（待办 / 日历 / 统计 / 搜索等切换）。
+
+- `src/components/MobileViewSegment.tsx`  
+  窄屏 **Today / Week / Month / Year** 分段（顶栏 `header`、待办底栏 `compact` 等变体）。
+
 - `src/components/CalendarGrid.tsx`  
   月历视图（日期格、事件条展示、溢出处理、点击日期跳转）。
 
@@ -73,7 +79,7 @@
   - `handleUpdateTodo(...)`
   - `handleDeleteTodo(...)`
   - `getFilteredTodos()`
-- **时间范围（scope）**：`TodoItem` 使用 `scopeType`（**`day` | `week` | `month` | `year`**）、`date`（日）、`scopeStart`（周起始日）、`scopeYear`（月 / 年锚定公历年）。新建任务时继承当前顶栏视图（Today → 日，Week → 周，Month → 月，Year → 年）。侧栏列表随视图切换过滤；**仍在当前时间段日历上有安排的**任务也会列出（与 `CalendarEvent.sourceTodoId` 联动）。标签展示见 `todoScope.ts`。
+- **时间范围（scope）**：`TodoItem` 使用 `scopeType`（**`day` | `week` | `month` | `year`**）、`date`（日）、`scopeStart`（周起始日）、`scopeYear`（月 / 年锚定公历年）。新建任务时继承当前顶栏视图（Today → 日，Week → 周，Month → 月，Year → 年）。侧栏列表随视图切换过滤；**仍在当前时间段日历上有安排的**任务也会列出（与 `CalendarEvent.sourceTodoId` 联动）。标签展示见 `todoScope.ts`。**未选日期时间的任务**默认落在当前导航日 **`currentDate`**（不是系统当日），详见 §2.14 与 `.cursorrules` 第 14 条。
 
 ### 2.2 日历规划（拖拽到月/周/日/年）
 - 视图文件：
@@ -171,6 +177,20 @@
 - **常用**：根目录 `npm run dev`（Vite）。
 - **局域网**：`vite.config.ts` 已设 `server.host: true`，终端会打印 **Network** URL，手机等同网设备可访问（需防火墙放行端口）。
 
+### 2.13 PWA（移动端 / iPhone「添加到主屏幕」）
+- **构建**：`npm run build` 产出 `dist/`；内含 **`manifest.webmanifest`**、**`sw.js`**（Workbox 预缓存）、**`pwa-*.png`**、**`apple-touch-icon.png`**。入口 **`src/main.tsx`** 调用 **`registerSW`**（`virtual:pwa-register`），新版本构建后会尝试自动更新缓存。
+- **本地预览 PWA**：必须先 **`npm run build`**，再 **`npm run preview`**（勿关终端）；浏览器打开终端里打印的地址（优先 **`http://127.0.0.1:4173/`**，若 **`localhost` 无法访问**多为 DNS/IPv6 问题）。端口被占用时 Vite 会自动换端口，**以终端为准**。若 **`dist/` 不存在**，`preview` 无法提供页面。
+- **配置**：`vite.config.ts` 中 **`VitePWA`**（`registerType: 'autoUpdate'`、`injectRegister: false`）；`base: './'` 便于挂在静态托管子路径。图标可用设计稿替换 **`public/pwa-192.png`**、**`pwa-512.png`**、**`apple-touch-icon.png`**（建议 **180×180**）后重新构建。
+- **部署前提**：站点须通过 **HTTPS** 提供（本机调试可用 **`https://localhost`** 或局域网 HTTPS；纯 **HTTP** 下 **Service Worker** 与「可安装」能力在多数浏览器不可用）。**CloudBase 静态网站托管**或任意对象存储 + CDN 均可；若使用 **BrowserRouter**，托管端需将 **未知路径回退到 `index.html`**（SPA）。
+- **环境变量**：与 Web 一致，**构建时**注入 **`VITE_*`**（见 `.env.example`）；部署流水线需在 build 前写入。
+- **iPhone**：Safari 打开站点 → **分享** → **添加到主屏幕**。横竖屏 **`orientation: any`**；刘海屏已设 **`viewport-fit=cover`**。推送与后台同步能力弱于原生 App，仍以 **打开 Web / PWA** 时使用为主。
+
+### 2.14 移动端布局补充（窄屏 · `App.tsx`）
+- **判定**：`src/hooks/useMediaQuery.ts`；满足 **`isMobileLayout`** 时主界面为底栏 Tab（**`MobileBottomNav.tsx`**），不再使用桌面顶栏 + 左侧 Todo 固定栏的同屏布局。
+- **日历 / 统计顶栏**：**`MobileViewSegment`**（Today / Week / Month / Year）与 **日期导航** 同一逻辑块：左右箭头调用 **`handlePrev` / `handleNext`**，文案为 **`headerLabel`**（与桌面顶栏一致）；月 / 年视图可点标题打开下拉。
+- **待办 Tab 底栏**：在 **`MobileViewSegment`（compact）** 下方另有一行 **日期导航**：文案仍为 **`headerLabel`**，左右箭头与 **`gap-1`** 贴近日期（与日历顶栏同一套间距）；整组 **`justify-center`** 水平居中；月 / 年下拉的浮层在底栏上方展开（**`bottom-full`**），避免遮挡底栏 Tab。
+- **点「Today」**：**`mobileSegmentSelect`** 在 **`viewType === 'today'`** 时会 **`setCurrentDate(new Date())`** 并切换视图，保证移动端日历 / 统计 / 待办三处分段里的 **Today** 都会回到**系统当天**（桌面顶栏 **Today** 仍走 **`handleToday`**，行为一致）。
+- **无定时新建任务**：默认归属日为当前日历导航日 **`currentDate`**（`toDateKey(currentDate)`），不用系统「今天」顶替；约定见 **`.cursorrules` 第 14 条**。
 
 ## 3. 典型调用链（便于理解）
 

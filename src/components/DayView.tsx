@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import { Check, GripVertical, ThumbsUp } from 'lucide-react';
 import type { CalendarEvent, TodoItem } from '@/types';
 import { isPeerEventInTeam } from '@/lib/teamCollab';
-import { getLunarDate, formatDateKey } from '@/lib/calendar-utils';
+import { formatDateKey } from '@/lib/calendar-utils';
 import { WEEKDAYS } from '@/lib/calendar-utils';
 
 interface DayViewProps {
@@ -66,7 +66,6 @@ export default function DayView({
   const day = currentDate.getDate();
   const dateStr = formatDateKey(year, month, day);
   const dayOfWeek = WEEKDAYS[currentDate.getDay() === 0 ? 6 : currentDate.getDay() - 1];
-  const lunarDate = getLunarDate(currentDate);
 
   const today = new Date();
   const todayStr = formatDateKey(today.getFullYear(), today.getMonth() + 1, today.getDate());
@@ -164,16 +163,18 @@ export default function DayView({
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[var(--shell-panel)] rounded-xl p-4 overflow-hidden">
-      {/* Day header */}
-      <div className={`text-center py-2 mb-2 ${isToday ? 'text-[var(--shell-accent)]' : 'text-[var(--shell-text-strong)]'}`}>
-        <div className="text-sm text-[var(--shell-subtle)]">{year}年{month}月 · 星期{dayOfWeek}</div>
-        <div className="flex items-center justify-center gap-2">
-          <div className={`text-3xl font-bold ${isToday ? 'text-[var(--shell-accent)]' : 'text-[var(--shell-text-strong)]'}`}>{day}</div>
-          {hasNote && (
-            <span className="text-xs leading-none px-1.5 py-1 rounded bg-[var(--shell-accent)] text-[var(--shell-accent-contrast)]">有笔记</span>
-          )}
-        </div>
-        <div className="text-sm text-[var(--shell-subtle)]">农历{lunarDate}</div>
+      {/* Day header：仅星期（年月日与农历改由顶栏日期导航展示） */}
+      <div
+        className={`mb-2 flex items-center justify-center gap-2 py-2 text-center ${
+          isToday ? 'text-[var(--shell-accent)]' : 'text-[var(--shell-text-strong)]'
+        }`}
+      >
+        <span className="text-xl font-semibold md:text-lg">星期{dayOfWeek}</span>
+        {hasNote ? (
+          <span className="rounded bg-[var(--shell-accent)] px-1.5 py-1 text-sm leading-none text-[var(--shell-accent-contrast)] md:text-xs">
+            有笔记
+          </span>
+        ) : null}
       </div>
 
       {/* Untimed events */}
@@ -188,7 +189,7 @@ export default function DayView({
       >
         {holidayEvent && (
           <div
-            className="text-sm font-medium text-white px-3 py-1 rounded inline-block"
+            className="inline-block rounded px-3 py-1 text-base font-medium text-white md:text-sm"
             style={{ backgroundColor: holidayEvent.color }}
           >
             {holidayEvent.title}
@@ -217,12 +218,12 @@ export default function DayView({
               />
             ) : null}
             <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: event.color }} />
-            <span className="text-[var(--shell-text-strong)] text-sm flex-1">{event.title}</span>
+            <span className="flex-1 text-base text-[var(--shell-text-strong)] md:text-sm">{event.title}</span>
             {event.completed && <Check className="w-4 h-4 text-[#10B981]" strokeWidth={3} />}
           </div>
         ))}
         {untimedEvents.length === 0 && (
-          <div className="px-1 py-1 text-xs text-[var(--shell-subtle)]">
+          <div className="px-1 py-1 text-sm text-[var(--shell-subtle)] md:text-xs">
             无明确时间任务（可从时间轴拖拽到此）
           </div>
         )}
@@ -257,7 +258,7 @@ export default function DayView({
                     onToggleComplete(event.id);
                   }}
                   className={`
-                    h-full px-2 py-0.5 rounded text-[13px] font-medium text-white
+                    h-full rounded px-2 py-0.5 text-base font-medium text-white md:text-sm
                     transition-all duration-200 flex items-center justify-between gap-1
                     ${event.completed ? 'opacity-50 line-through' : 'opacity-100'}
                     ${isDragging ? 'opacity-40 scale-[0.98]' : ''}
@@ -280,7 +281,7 @@ export default function DayView({
                     ) : null}
                     <span className="truncate">{event.title}</span>
                   </div>
-                  <span className="text-[10px] opacity-70 flex-shrink-0">{event.startTime}</span>
+                  <span className="flex-shrink-0 text-xs opacity-70">{event.startTime}</span>
                 </div>
               </div>
             );
@@ -315,7 +316,7 @@ export default function DayView({
               >
                 {/* Time label */}
                 <div className="w-12 text-right pr-2 flex-shrink-0 pt-0.5">
-                  <span className={`text-xs ${isHourMark ? 'text-[var(--shell-text-muted)]' : 'text-[var(--shell-faint)]'}`}>
+                  <span className={`text-sm md:text-xs ${isHourMark ? 'text-[var(--shell-text-muted)]' : 'text-[var(--shell-faint)]'}`}>
                     {slot.label}
                   </span>
                 </div>

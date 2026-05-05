@@ -13,6 +13,8 @@ export interface TodoItem {
   /** 月范围 / 年范围任务所属公历年；缺省时月任务仅在「月份数字」匹配各年（兼容旧数据） */
   scopeYear?: number;
   count: number | null; // null means empty (not started yet)
+  /** 侧栏点击分类圆圈标记为已完成（划线）；缺省为未完成 */
+  completed?: boolean;
   updatedAt?: number;
   /** 协作云：任务归属邮箱；未标时视为创建者 ownerEmail */
   collabOwnerEmail?: string;

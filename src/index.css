@@ -44,6 +44,19 @@
   }
 }
 
+/* 窄屏（手机 / PWA）：提高根字号，所有基于 rem 的 Tailwind 字号与间距按比例变大 */
+@media (max-width: 768px) {
+  html {
+    font-size: 112.5%;
+  }
+}
+
+@media (max-width: 480px) {
+  html {
+    font-size: 118.75%;
+  }
+}
+
 /* 应用壳层主题（主布局、侧栏、日历面板）。默认深色；html.theme-light 为浅暖色 + 橙点缀 */
 :root {
   --shell-bg: #1a1a1f;

@@ -9,6 +9,7 @@ import { useSharedAccountAuth } from './useSharedAccountAuth';
 import { watchUserSnapshotByEmail } from './userSnapshotDb';
 import type { UserSnapshotDocPayload } from './userSnapshotDb';
 import { syncDebugInfo, syncDebugWarn } from './syncDebug';
+import { formatAccountFetchErrorMessage } from './desktopFetchHint';
 
 const AUTO_PUSH_IDLE_MS = 30_000;
 const AUTO_PUSH_INTERVAL_MS = 60_000;
@@ -1012,7 +1013,7 @@ export default function AccountLoginModal({
     try {
       await sendCode(email);
     } catch (e) {
-      setError(e instanceof Error ? e.message : '发送失败');
+      setError(formatAccountFetchErrorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -1067,7 +1068,7 @@ export default function AccountLoginModal({
         console.warn('[account] login auto-pull failed', pullErr);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : '验证失败');
+      setError(formatAccountFetchErrorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -1412,7 +1413,7 @@ export default function AccountLoginModal({
         {(error || hint || syncStatus) ? (
           <div
             className={`border-b border-[var(--shell-border-subtle)] px-5 py-2 text-sm ${
-              error ? 'text-red-400' : 'text-[var(--shell-text-muted)]'
+              error ? 'whitespace-pre-wrap text-red-400' : 'text-[var(--shell-text-muted)]'
             }`}
           >
             {error || hint || syncStatus}
@@ -1651,7 +1652,7 @@ export default function AccountLoginModal({
                             >
                               {isMe ? (
                                 <span
-                                  className="mt-0.5 inline-flex h-4 min-w-[1rem] shrink-0 items-center justify-center rounded bg-emerald-500/20 px-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-300"
+                                  className="mt-0.5 inline-flex h-5 min-w-[1.25rem] shrink-0 items-center justify-center rounded bg-emerald-500/20 px-1 text-xs font-medium text-emerald-600 dark:text-emerald-300"
                                   title="当前登录账号（本人）"
                                 >
                                   我

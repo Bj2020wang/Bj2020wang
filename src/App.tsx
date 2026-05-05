@@ -10,6 +10,8 @@ import {
   CalendarDays,
 } from 'lucide-react';
 import TodoSidebar from '@/components/TodoSidebar';
+import MobileBottomNav, { type MobileMainTab } from '@/components/MobileBottomNav';
+import MobileViewSegment from '@/components/MobileViewSegment';
 import CalendarGrid from '@/components/CalendarGrid';
 import WeekView from '@/components/WeekView';
 import DayView from '@/components/DayView';
@@ -31,6 +33,7 @@ import type { ViewType, CalendarEvent, TodoItem, TodoCategory, TodoScopeType } f
 import { getMonthDays, getWeekDays } from '@/lib/calendar-utils';
 import { getCalendarViewRange } from '@/lib/viewRange';
 import { resolveTodoScopeType } from '@/lib/todoScope';
+import { pickPrimaryTodoTimedEvent } from '@/lib/todoCalendarLink';
 import {
   buildWriteOwnTeamSnapshot,
   effectiveEventOwnerEmail,
@@ -48,6 +51,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { zhCN } from 'date-fns/locale';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import './App.css';
+import { useIsMobileLayout } from '@/hooks/useMediaQuery';
 
 // 2024年10月9日=周三, 10日=周四, 13日=周日
 const defaultTodos: TodoItem[] = [
@@ -192,6 +196,14 @@ function isPersistedDataLike(value: unknown): value is PersistedData {
   return true;
 }
 
+function isValidDateKey(s: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split('-').map(Number);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return false;
+  const dt = new Date(y, m - 1, d);
+  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+}
+
 const toDateKey = (date: Date): string => {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -307,6 +319,7 @@ const TODO_COMPARE_FIELDS: Array<keyof TodoItem> = [
   'scopeStart',
   'scopeYear',
   'count',
+  'completed',
   'collabOwnerEmail',
 ];
 
@@ -680,23 +693,53 @@ export default function App() {
   const [jumpCalendarMonth, setJumpCalendarMonth] = useState<Date>(() => new Date());
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const [showStatisticsOverview, setShowStatisticsOverview] = useState(false);
+  const isMobileLayout = useIsMobileLayout(768);
+  const [mobileMainTab, setMobileMainTab] = useState<MobileMainTab>('todo');
   const sidebarOverlayOpenRef = useRef(false);
+  const isMobileLayoutRef = useRef(false);
+  const mobileMainTabRef = useRef<MobileMainTab>('todo');
+
+  const effectiveShowGlobalSearch = !isMobileLayout && showGlobalSearch;
+  const effectiveShowStatisticsOverview = !isMobileLayout && showStatisticsOverview;
+
   useEffect(() => {
-    sidebarOverlayOpenRef.current = showGlobalSearch || showStatisticsOverview;
-  }, [showGlobalSearch, showStatisticsOverview]);
+    isMobileLayoutRef.current = isMobileLayout;
+  }, [isMobileLayout]);
+  useEffect(() => {
+    mobileMainTabRef.current = mobileMainTab;
+  }, [mobileMainTab]);
+
+  useEffect(() => {
+    sidebarOverlayOpenRef.current = effectiveShowGlobalSearch || effectiveShowStatisticsOverview;
+  }, [effectiveShowGlobalSearch, effectiveShowStatisticsOverview]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setShowStatisticsOverview(false);
-        setShowGlobalSearch(true);
+        if (isMobileLayoutRef.current) {
+          setMobileMainTab('search');
+          setShowGlobalSearch(false);
+        } else {
+          setShowGlobalSearch(true);
+        }
         return;
       }
-      if (e.key === 'Escape' && sidebarOverlayOpenRef.current) {
-        e.preventDefault();
-        setShowGlobalSearch(false);
-        setShowStatisticsOverview(false);
+      if (e.key === 'Escape') {
+        if (
+          isMobileLayoutRef.current &&
+          (mobileMainTabRef.current === 'search' || mobileMainTabRef.current === 'stats')
+        ) {
+          e.preventDefault();
+          setMobileMainTab('calendar');
+          return;
+        }
+        if (sidebarOverlayOpenRef.current) {
+          e.preventDefault();
+          setShowGlobalSearch(false);
+          setShowStatisticsOverview(false);
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown, true);
@@ -1050,6 +1093,115 @@ export default function App() {
     }
   }, [workspaceMode, activeTeamId, teamPeerAccess, accountEmail, teamOwnerEmail]);
 
+  /** Todo 侧栏「+」新建：有定时 → 写入对应日期的时刻日程；无定时 → 默认当前导航日、无 startTime 的日程（该日日视图「无明确时间」区） */
+  const handleAddTodo = useCallback(
+    (
+      text: string,
+      category: TodoCategory,
+      options?: { startTime?: string; scheduleDate?: string }
+    ) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+
+      const id = `${Date.now()}`;
+      const navDateKey = toDateKey(currentDate);
+      const navWeekStart = getWeekDays(new Date(currentDate))[0].fullDate;
+      const scopeTypeFromView: TodoScopeType =
+        viewType === 'today'
+          ? 'day'
+          : viewType === 'week'
+            ? 'week'
+            : viewType === 'year'
+              ? 'year'
+              : 'month';
+      const collab =
+        workspaceMode === 'team' && accountEmail ? normCollabEmail(accountEmail) : undefined;
+
+      const color = categoryColorMap[category];
+      const rawTime = options?.startTime?.trim();
+      const hasTime = !!rawTime;
+
+      const todayKey = toDateKey(new Date());
+
+      let effectiveScopeType: TodoScopeType = scopeTypeFromView;
+      let todoMonth = month;
+      let todoDate: string | undefined;
+      let todoScopeStart: string | undefined;
+      let todoScopeYear: number | undefined;
+      let eventStartDate = navDateKey;
+
+      if (hasTime && rawTime) {
+        const cand = options?.scheduleDate?.trim();
+        const scheduleDateKey = cand && isValidDateKey(cand) ? cand : todayKey;
+        eventStartDate = scheduleDateKey;
+        const sy = Number(scheduleDateKey.slice(0, 4));
+        const sm = Number(scheduleDateKey.slice(5, 7));
+        const scheduleWeekStart = getWeekDays(new Date(`${scheduleDateKey}T12:00:00`))[0].fullDate;
+        todoMonth = sm;
+        todoDate = scopeTypeFromView === 'day' ? scheduleDateKey : undefined;
+        todoScopeStart = scopeTypeFromView === 'week' ? scheduleWeekStart : undefined;
+        todoScopeYear = scopeTypeFromView === 'month' || scopeTypeFromView === 'year' ? sy : undefined;
+      } else {
+        // 未选日期时间：默认当前导航日，创建无 startTime 的日程 → 该日日视图「无明确时间任务」区
+        effectiveScopeType = 'day';
+        todoMonth = Number(navDateKey.slice(5, 7));
+        todoDate = navDateKey;
+        todoScopeStart = undefined;
+        todoScopeYear = undefined;
+      }
+
+      const newTodo: TodoItem = {
+        id,
+        text: trimmed,
+        category,
+        color,
+        month: todoMonth,
+        date: todoDate,
+        scopeType: effectiveScopeType,
+        scopeStart: todoScopeStart,
+        scopeYear: todoScopeYear,
+        count: 1,
+        updatedAt: Date.now(),
+        ...(collab !== undefined ? { collabOwnerEmail: collab } : {}),
+      };
+
+      setTodos((prev) => [...prev, newTodo]);
+
+      const evCollabBase =
+        workspaceMode === 'team' && teamOwnerEmail
+          ? effectiveTodoOwnerEmail(newTodo, teamOwnerEmail)
+          : undefined;
+
+      if (hasTime && rawTime) {
+        const newEvent: CalendarEvent = {
+          id: `event-${Date.now()}`,
+          title: trimmed,
+          color: color === '#FFFFFF' ? '#9CA3AF' : color,
+          startDate: eventStartDate,
+          sourceTodoId: id,
+          startTime: rawTime,
+          endTime: getEndTime(rawTime),
+          reminderMinutes: [50, 45, 40, 35, 30, 25, 20, 15, 10, 5],
+          updatedAt: Date.now(),
+          ...(evCollabBase !== undefined ? { collabOwnerEmail: evCollabBase } : {}),
+        };
+        setEvents((prev) => [...prev, newEvent]);
+      } else {
+        const newEvent: CalendarEvent = {
+          id: `event-${id}`,
+          title: trimmed,
+          color: color === '#FFFFFF' ? '#9CA3AF' : color,
+          startDate: navDateKey,
+          sourceTodoId: id,
+          updatedAt: Date.now(),
+          ...(evCollabBase !== undefined ? { collabOwnerEmail: evCollabBase } : {}),
+        };
+        setEvents((prev) => [...prev, newEvent]);
+      }
+    },
+    [currentDate, viewType, month, year, workspaceMode, accountEmail, teamOwnerEmail]
+  );
+
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
@@ -1189,32 +1341,179 @@ export default function App() {
     setViewType('today');
     setShowGlobalSearch(false);
     setShowJumpCalendar(false);
-  }, []);
+    if (isMobileLayout) setMobileMainTab('calendar');
+  }, [isMobileLayout]);
 
-  const handleUpdateTodo = useCallback((todoId: string, text: string, category: TodoCategory) => {
-    if (
-      workspaceMode === 'team' &&
-      activeTeamId &&
-      teamPeerAccess === 'peerReadAllWriteOwn' &&
-      accountEmail &&
-      teamOwnerEmail &&
-      normCollabEmail(accountEmail) !== normCollabEmail(teamOwnerEmail)
-    ) {
-      const t = todosRef.current.find((x) => x.id === todoId);
-      if (t && effectiveTodoOwnerEmail(t, teamOwnerEmail) !== normCollabEmail(accountEmail)) {
-        return;
+  const handleUpdateTodo = useCallback(
+    (
+      todoId: string,
+      text: string,
+      category: TodoCategory,
+      options?: { wantSchedule?: boolean; startTime?: string; scheduleDate?: string }
+    ) => {
+      if (
+        workspaceMode === 'team' &&
+        activeTeamId &&
+        teamPeerAccess === 'peerReadAllWriteOwn' &&
+        accountEmail &&
+        teamOwnerEmail &&
+        normCollabEmail(accountEmail) !== normCollabEmail(teamOwnerEmail)
+      ) {
+        const t = todosRef.current.find((x) => x.id === todoId);
+        if (t && effectiveTodoOwnerEmail(t, teamOwnerEmail) !== normCollabEmail(accountEmail)) {
+          return;
+        }
       }
-    }
-    const nextColor = categoryColorMap[category];
-    setTodos((prev) =>
-      prev.map((todo) => (todo.id === todoId ? { ...todo, text, category, color: nextColor, updatedAt: Date.now() } : todo))
-    );
-    setEvents((prev) =>
-      prev.map((event) =>
-        event.sourceTodoId === todoId ? { ...event, title: text, color: nextColor, updatedAt: Date.now() } : event
-      )
-    );
-  }, [workspaceMode, activeTeamId, teamPeerAccess, accountEmail, teamOwnerEmail]);
+      const existing = todosRef.current.find((x) => x.id === todoId);
+      if (!existing) return;
+
+      const trimmed = text.trim();
+      if (!trimmed) return;
+
+      const nextColor = categoryColorMap[category];
+      const eventColor = nextColor === '#FFFFFF' ? '#9CA3AF' : nextColor;
+      const wantSchedule = options?.wantSchedule === true;
+      const rawTime = options?.startTime?.trim();
+      const cand = options?.scheduleDate?.trim();
+
+      const navDateKey = toDateKey(currentDate);
+      const navWeekStart = getWeekDays(new Date(currentDate))[0].fullDate;
+      const scopeType: TodoScopeType = existing.scopeType ?? 'day';
+
+      const patchTodoForSchedule = (base: TodoItem): TodoItem => {
+        if (wantSchedule && rawTime) {
+          const scheduleDateKey = cand && isValidDateKey(cand) ? cand : toDateKey(new Date());
+          const sy = Number(scheduleDateKey.slice(0, 4));
+          const sm = Number(scheduleDateKey.slice(5, 7));
+          const scheduleWeekStart = getWeekDays(new Date(`${scheduleDateKey}T12:00:00`))[0].fullDate;
+          return {
+            ...base,
+            month: sm,
+            date: scopeType === 'day' ? scheduleDateKey : undefined,
+            scopeStart: scopeType === 'week' ? scheduleWeekStart : undefined,
+            scopeYear: scopeType === 'month' || scopeType === 'year' ? sy : undefined,
+            count: base.count === null ? 1 : base.count,
+          };
+        }
+        if (!wantSchedule) {
+          return {
+            ...base,
+            month,
+            date: scopeType === 'day' ? navDateKey : undefined,
+            scopeStart: scopeType === 'week' ? navWeekStart : undefined,
+            scopeYear: scopeType === 'month' || scopeType === 'year' ? year : undefined,
+            count: null,
+          };
+        }
+        return base;
+      };
+
+      setTodos((prev) =>
+        prev.map((todo) => {
+          if (todo.id !== todoId) return todo;
+          let next: TodoItem = {
+            ...todo,
+            text: trimmed,
+            category,
+            color: nextColor,
+            updatedAt: Date.now(),
+          };
+          if (options !== undefined) {
+            next = patchTodoForSchedule(next);
+          }
+          return next;
+        })
+      );
+
+      setEvents((prev) => {
+        if (!wantSchedule) {
+          return prev.filter((e) => e.sourceTodoId !== todoId);
+        }
+
+        if (wantSchedule && rawTime) {
+          const scheduleDateKey = cand && isValidDateKey(cand) ? cand : toDateKey(new Date());
+          const primary = pickPrimaryTodoTimedEvent(prev, existing);
+          const evCollab =
+            workspaceMode === 'team' && teamOwnerEmail
+              ? effectiveTodoOwnerEmail(existing, teamOwnerEmail)
+              : undefined;
+
+          let next = prev.map((ev) => {
+            if (ev.sourceTodoId !== todoId) return ev;
+            return { ...ev, title: trimmed, color: eventColor, updatedAt: Date.now() };
+          });
+
+          if (primary) {
+            next = next.map((ev) =>
+              ev.id === primary.id
+                ? {
+                    ...ev,
+                    title: trimmed,
+                    color: eventColor,
+                    startDate: scheduleDateKey,
+                    startTime: rawTime,
+                    endTime: getEndTime(rawTime),
+                    reminderMinutes:
+                      ev.reminderMinutes && ev.reminderMinutes.length > 0
+                        ? ev.reminderMinutes
+                        : [50, 45, 40, 35, 30, 25, 20, 15, 10, 5],
+                    updatedAt: Date.now(),
+                  }
+                : ev
+            );
+            return next;
+          }
+
+          const newEvent: CalendarEvent = {
+            id: `event-${Date.now()}`,
+            title: trimmed,
+            color: eventColor,
+            startDate: scheduleDateKey,
+            sourceTodoId: todoId,
+            startTime: rawTime,
+            endTime: getEndTime(rawTime),
+            reminderMinutes: [50, 45, 40, 35, 30, 25, 20, 15, 10, 5],
+            updatedAt: Date.now(),
+            ...(evCollab !== undefined ? { collabOwnerEmail: evCollab } : {}),
+          };
+          return [...next, newEvent];
+        }
+
+        return prev.map((event) =>
+          event.sourceTodoId === todoId
+            ? { ...event, title: trimmed, color: eventColor, updatedAt: Date.now() }
+            : event
+        );
+      });
+    },
+    [workspaceMode, activeTeamId, teamPeerAccess, accountEmail, teamOwnerEmail, currentDate, month, year]
+  );
+
+  const handleToggleTodoComplete = useCallback(
+    (todoId: string) => {
+      if (
+        workspaceMode === 'team' &&
+        activeTeamId &&
+        teamPeerAccess === 'peerReadAllWriteOwn' &&
+        accountEmail &&
+        teamOwnerEmail &&
+        normCollabEmail(accountEmail) !== normCollabEmail(teamOwnerEmail)
+      ) {
+        const t = todosRef.current.find((x) => x.id === todoId);
+        if (t && effectiveTodoOwnerEmail(t, teamOwnerEmail) !== normCollabEmail(accountEmail)) {
+          return;
+        }
+      }
+      setTodos((prev) =>
+        prev.map((t) =>
+          t.id === todoId
+            ? { ...t, completed: !(t.completed ?? false), updatedAt: Date.now() }
+            : t
+        )
+      );
+    },
+    [workspaceMode, activeTeamId, teamPeerAccess, accountEmail, teamOwnerEmail]
+  );
 
   const handleDeleteTodo = useCallback((todoId: string) => {
     if (
@@ -1866,10 +2165,369 @@ export default function App() {
 
   const { theme, toggleTheme } = useAppTheme();
 
+  const mobileSegmentSelect = (vt: ViewType) => {
+    setShowMonthPicker(false);
+    setShowYearPicker(false);
+    setShowJumpCalendar(false);
+    if (vt === 'today') {
+      setCurrentDate(new Date());
+    }
+    setViewType(vt);
+  };
+
   return (
-    <div className="h-screen w-screen bg-[var(--shell-bg)] flex flex-col p-6 overflow-hidden">
-      {/* Header */}
-      <header className="flex items-center justify-between mb-6">
+    <>
+      {isMobileLayout ? (
+        <div className="flex h-[100dvh] w-screen flex-col overflow-hidden bg-[var(--shell-bg)] pt-[env(safe-area-inset-top)]">
+          <div className="flex min-h-0 flex-1 flex-col gap-2 px-3 pb-2 pt-3">
+            {mobileMainTab === 'calendar' || mobileMainTab === 'stats' ? (
+              <div className="flex shrink-0 flex-col gap-2">
+                <MobileViewSegment variant="header" viewType={viewType} onSelect={mobileSegmentSelect} />
+                <div className="relative flex shrink-0 items-center justify-start gap-1 px-0">
+                  <button
+                    type="button"
+                    onClick={handlePrev}
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors duration-200 hover:bg-[var(--shell-surface-hover)]"
+                  >
+                    <ChevronLeft className="h-5 w-5 text-[var(--shell-icon)]" />
+                  </button>
+                  <div className="relative min-w-0 shrink text-left">
+                    {showMonthDropdown ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowMonthPicker(!showMonthPicker);
+                          setShowYearPicker(false);
+                          setShowJumpCalendar(false);
+                        }}
+                        className="inline-flex items-center gap-1 text-base font-semibold text-[var(--shell-text-strong)] transition-colors hover:text-[var(--shell-accent)]"
+                      >
+                        {headerLabel}
+                        <ChevronDown className="h-4 w-4" />
+                      </button>
+                    ) : showYearDropdown ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowYearPicker(!showYearPicker);
+                          setShowMonthPicker(false);
+                          setShowJumpCalendar(false);
+                        }}
+                        className="inline-flex items-center gap-1 text-base font-semibold text-[var(--shell-text-strong)] transition-colors hover:text-[var(--shell-accent)]"
+                      >
+                        {headerLabel}
+                        <ChevronDown className="h-4 w-4" />
+                      </button>
+                    ) : (
+                      <span className="text-base font-semibold text-[var(--shell-text-strong)]">{headerLabel}</span>
+                    )}
+                    {showMonthPicker && showMonthDropdown ? (
+                      <div className="absolute left-0 top-full z-50 mt-2 w-[min(16rem,calc(100vw-2rem))] rounded-xl border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] p-3 shadow-xl">
+                        <div className="mb-2 text-sm font-medium text-[var(--shell-text-muted)]">{year}年</div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                            <button
+                              key={m}
+                              type="button"
+                              onClick={() => handleMonthSelect(m)}
+                              className={`
+                                rounded-lg px-3 py-2 text-sm font-medium transition-colors
+                                ${
+                                  m === month
+                                    ? 'bg-[var(--shell-accent)] text-[var(--shell-accent-contrast)]'
+                                    : 'text-[var(--shell-text-strong)] hover:bg-[var(--shell-surface-hover)]'
+                                }
+                              `}
+                            >
+                              {m}月
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    {showYearPicker && showYearDropdown ? (
+                      <div className="absolute left-0 top-full z-50 mt-2 max-h-72 w-[min(18rem,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] p-3 shadow-xl">
+                        <div className="mb-2 text-sm font-medium text-[var(--shell-text-muted)]">选择年份</div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {Array.from({ length: 24 }, (_, i) => year - 10 + i).map((yOpt) => (
+                            <button
+                              key={yOpt}
+                              type="button"
+                              onClick={() => handleYearSelect(yOpt)}
+                              className={`
+                                rounded-lg px-3 py-2 text-sm font-medium transition-colors
+                                ${
+                                  yOpt === year
+                                    ? 'bg-[var(--shell-accent)] text-[var(--shell-accent-contrast)]'
+                                    : 'text-[var(--shell-text-strong)] hover:bg-[var(--shell-surface-hover)]'
+                                }
+                              `}
+                            >
+                              {yOpt}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleNext}
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors duration-200 hover:bg-[var(--shell-surface-hover)]"
+                  >
+                    <ChevronRight className="h-5 w-5 text-[var(--shell-icon)]" />
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              {mobileMainTab === 'todo' ? (
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] shadow-sm">
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                    <TodoSidebar
+                      layout="mobile"
+                      todos={todos}
+                      viewType={viewType}
+                      currentDate={currentDate}
+                      filteredTodos={filteredTodos}
+                      onDragStart={handleDragStart}
+                      onToggleTodoComplete={handleToggleTodoComplete}
+                      onAddTodo={handleAddTodo}
+                      onUpdateTodo={handleUpdateTodo}
+                      events={events}
+                      onDeleteTodo={handleDeleteTodo}
+                      onResetLocalData={handleResetLocalData}
+                      onExportData={handleExportData}
+                      onImportData={handleImportData}
+                      onTestNotification={handleTestNotification}
+                      noteDateKey={currentDateKey}
+                      noteContent={notesByDate[currentDateKey] ?? ''}
+                      noteOwnerEmail={currentNoteOwnerEmail || null}
+                      isPeerNote={isPeerNoteForCurrentDate}
+                      canEditPeerNote={canEditPeerNote}
+                      onSaveNote={handleSaveNote}
+                      workspaceMode={workspaceMode}
+                      accountEmail={accountEmail}
+                      teamOwnerEmail={teamOwnerEmail}
+                      onOpenSettings={() => setShowAccountLogin(true)}
+                      appTheme={theme}
+                      onToggleAppTheme={toggleTheme}
+                    />
+                  </div>
+                  <div className="shrink-0 border-t border-[var(--shell-border-subtle)] bg-[var(--shell-bg)] px-2 py-1.5">
+                    <MobileViewSegment
+                      variant="compact"
+                      viewType={viewType}
+                      onSelect={mobileSegmentSelect}
+                    />
+                    <div className="relative mt-1.5 flex justify-center px-0">
+                      <div className="flex max-w-full shrink-0 items-center justify-start gap-1">
+                      <button
+                        type="button"
+                        onClick={handlePrev}
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors duration-200 hover:bg-[var(--shell-surface-hover)]"
+                      >
+                        <ChevronLeft className="h-5 w-5 text-[var(--shell-icon)]" />
+                      </button>
+                      <div className="relative min-w-0 shrink text-left">
+                        {showMonthDropdown ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowMonthPicker(!showMonthPicker);
+                              setShowYearPicker(false);
+                              setShowJumpCalendar(false);
+                            }}
+                            className="inline-flex max-w-full items-center gap-1 text-base font-semibold text-[var(--shell-text-strong)] transition-colors hover:text-[var(--shell-accent)]"
+                          >
+                            <span className="min-w-0 break-words">{headerLabel}</span>
+                            <ChevronDown className="h-4 w-4 shrink-0" />
+                          </button>
+                        ) : showYearDropdown ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowYearPicker(!showYearPicker);
+                              setShowMonthPicker(false);
+                              setShowJumpCalendar(false);
+                            }}
+                            className="inline-flex max-w-full items-center gap-1 text-base font-semibold text-[var(--shell-text-strong)] transition-colors hover:text-[var(--shell-accent)]"
+                          >
+                            <span className="min-w-0 break-words">{headerLabel}</span>
+                            <ChevronDown className="h-4 w-4 shrink-0" />
+                          </button>
+                        ) : (
+                          <span className="text-base font-semibold text-[var(--shell-text-strong)]">{headerLabel}</span>
+                        )}
+                        {showMonthPicker && showMonthDropdown ? (
+                          <div className="absolute bottom-full left-0 z-50 mb-2 w-[min(16rem,calc(100vw-2rem))] rounded-xl border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] p-3 shadow-xl">
+                            <div className="mb-2 text-sm font-medium text-[var(--shell-text-muted)]">{year}年</div>
+                            <div className="grid grid-cols-3 gap-2">
+                              {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                                <button
+                                  key={m}
+                                  type="button"
+                                  onClick={() => handleMonthSelect(m)}
+                                  className={`
+                                    rounded-lg px-3 py-2 text-sm font-medium transition-colors
+                                    ${
+                                      m === month
+                                        ? 'bg-[var(--shell-accent)] text-[var(--shell-accent-contrast)]'
+                                        : 'text-[var(--shell-text-strong)] hover:bg-[var(--shell-surface-hover)]'
+                                    }
+                                  `}
+                                >
+                                  {m}月
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                        {showYearPicker && showYearDropdown ? (
+                          <div className="absolute bottom-full left-0 z-50 mb-2 max-h-72 w-[min(18rem,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] p-3 shadow-xl">
+                            <div className="mb-2 text-sm font-medium text-[var(--shell-text-muted)]">选择年份</div>
+                            <div className="grid grid-cols-3 gap-2">
+                              {Array.from({ length: 24 }, (_, i) => year - 10 + i).map((yOpt) => (
+                                <button
+                                  key={yOpt}
+                                  type="button"
+                                  onClick={() => handleYearSelect(yOpt)}
+                                  className={`
+                                    rounded-lg px-3 py-2 text-sm font-medium transition-colors
+                                    ${
+                                      yOpt === year
+                                        ? 'bg-[var(--shell-accent)] text-[var(--shell-accent-contrast)]'
+                                        : 'text-[var(--shell-text-strong)] hover:bg-[var(--shell-surface-hover)]'
+                                    }
+                                  `}
+                                >
+                                  {yOpt}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleNext}
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors duration-200 hover:bg-[var(--shell-surface-hover)]"
+                      >
+                        <ChevronRight className="h-5 w-5 text-[var(--shell-icon)]" />
+                      </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {mobileMainTab === 'calendar' ? (
+                <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-[var(--shell-border-subtle)] bg-[var(--shell-bg)] p-1 shadow-sm">
+                  {viewType === 'month' ? (
+                    <CalendarGrid
+                      days={days}
+                      events={events}
+                      onDrop={handleDrop}
+                      onDragOver={handleDragOver}
+                      onDragLeave={() => {}}
+                      onToggleComplete={handleToggleComplete}
+                      onDayClick={handleDayCellClick}
+                      notesByDate={notesByDate}
+                      todos={todos}
+                      workspaceMode={workspaceMode}
+                      accountEmail={accountEmail}
+                      teamOwnerEmail={teamOwnerEmail}
+                    />
+                  ) : null}
+                  {viewType === 'week' ? (
+                    <WeekView
+                      currentDate={currentDate}
+                      events={events}
+                      onDrop={handleDrop}
+                      onDragOver={handleDragOver}
+                      onToggleComplete={handleToggleComplete}
+                      onDayClick={handleDayCellClick}
+                      notesByDate={notesByDate}
+                      todos={todos}
+                      workspaceMode={workspaceMode}
+                      accountEmail={accountEmail}
+                      teamOwnerEmail={teamOwnerEmail}
+                    />
+                  ) : null}
+                  {viewType === 'today' ? (
+                    <DayView
+                      currentDate={currentDate}
+                      events={events}
+                      onDrop={handleDrop}
+                      onDragOver={handleDragOver}
+                      onToggleComplete={handleToggleComplete}
+                      onMoveEvent={handleMoveEvent}
+                      notesByDate={notesByDate}
+                      todos={todos}
+                      workspaceMode={workspaceMode}
+                      accountEmail={accountEmail}
+                      teamOwnerEmail={teamOwnerEmail}
+                    />
+                  ) : null}
+                  {viewType === 'year' ? (
+                    <YearView
+                      year={year}
+                      events={events}
+                      onPickMonth={(m) => {
+                        setCurrentDate(new Date(year, m - 1, 1));
+                        setViewType('month');
+                        setShowYearPicker(false);
+                        setShowMonthPicker(false);
+                      }}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+
+              {mobileMainTab === 'stats' ? (
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                  <StatisticsOverviewPanel
+                    filteredTodos={filteredTodos}
+                    events={events}
+                    viewType={viewType}
+                    currentDate={currentDate}
+                    onClose={() => setMobileMainTab('calendar')}
+                  />
+                </div>
+              ) : null}
+
+              {mobileMainTab === 'search' ? (
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                  <GlobalSearchPanel
+                    embedded
+                    events={events}
+                    todos={todos}
+                    notesByDate={notesByDate}
+                    workspaceMode={workspaceMode}
+                    accountEmail={accountEmail}
+                    teamOwnerEmail={teamOwnerEmail}
+                    noteOwnerByDate={noteOwnerByDate}
+                    onClose={() => setMobileMainTab('calendar')}
+                    onJumpToDate={handleSearchJumpToDate}
+                  />
+                </div>
+              ) : null}
+            </div>
+          </div>
+          <MobileBottomNav
+            active={mobileMainTab}
+            onChange={(tab) => {
+              setMobileMainTab(tab);
+              setShowGlobalSearch(false);
+              setShowStatisticsOverview(false);
+            }}
+          />
+        </div>
+      ) : (
+        <div className="flex h-screen w-screen flex-col overflow-hidden bg-[var(--shell-bg)] p-6">
+          {/* Header */}
+          <header className="mb-6 flex items-center justify-between">
         {/* Left: Navigation */}
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
@@ -2079,10 +2737,10 @@ export default function App() {
                   month_caption:
                     'relative z-0 mb-2 flex h-10 w-full items-center justify-center pointer-events-none px-10',
                   caption_label:
-                    'pointer-events-auto text-center text-sm font-semibold text-[var(--shell-text-strong)] sm:text-base',
+                    'pointer-events-auto text-center text-base font-semibold text-[var(--shell-text-strong)] sm:text-base',
                   weekdays: 'mb-1.5 flex w-full gap-0.5',
                   weekday:
-                    'flex-1 py-0.5 text-center text-[12px] font-semibold text-[var(--shell-subtle)] sm:text-[13px]',
+                    'flex-1 py-0.5 text-center text-base font-semibold text-[var(--shell-subtle)] sm:text-[13px]',
                   week: 'flex w-full gap-0.5',
                   day: 'min-w-0 flex-1 flex items-center justify-center',
                   table: 'w-full border-collapse border-spacing-0',
@@ -2106,73 +2764,75 @@ export default function App() {
               </div>
             </PopoverContent>
           </Popover>
-          <button
-            type="button"
-            onClick={handleToday}
-            className={`
-              px-4 py-2 rounded-lg text-sm font-medium border transition-colors duration-200
-              ${viewType === 'today'
-                ? 'border-[var(--shell-accent)] text-[var(--shell-accent)] bg-transparent'
-                : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
-              }
-            `}
-          >
-            Today
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setShowMonthPicker(false);
-              setShowYearPicker(false);
-              setShowJumpCalendar(false);
-              setViewType('week');
-            }}
-            className={`
-              px-4 py-2 rounded-lg text-sm font-medium border transition-colors duration-200
-              ${viewType === 'week'
-                ? 'border-[var(--shell-accent)] text-[var(--shell-accent)] bg-transparent'
-                : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
-              }
-            `}
-          >
-            Week
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setShowMonthPicker(false);
-              setShowYearPicker(false);
-              setShowJumpCalendar(false);
-              setViewType('month');
-            }}
-            className={`
-              px-4 py-2 rounded-lg text-sm font-medium border transition-colors duration-200
-              ${viewType === 'month'
-                ? 'border-[var(--shell-accent)] text-[var(--shell-accent)] bg-transparent'
-                : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
-              }
-            `}
-          >
-            Month
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setShowMonthPicker(false);
-              setShowYearPicker(false);
-              setShowJumpCalendar(false);
-              setViewType('year');
-            }}
-            className={`
-              px-4 py-2 rounded-lg text-sm font-medium border transition-colors duration-200
-              ${viewType === 'year'
-                ? 'border-[var(--shell-accent)] text-[var(--shell-accent)] bg-transparent'
-                : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
-              }
-            `}
-          >
-            Year
-          </button>
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={handleToday}
+              className={`
+                rounded-md border px-2 py-1 text-xs font-medium transition-colors duration-200
+                ${viewType === 'today'
+                  ? 'border-[var(--shell-accent)] text-[var(--shell-accent)] bg-transparent'
+                  : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
+                }
+              `}
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowMonthPicker(false);
+                setShowYearPicker(false);
+                setShowJumpCalendar(false);
+                setViewType('week');
+              }}
+              className={`
+                rounded-md border px-2 py-1 text-xs font-medium transition-colors duration-200
+                ${viewType === 'week'
+                  ? 'border-[var(--shell-accent)] text-[var(--shell-accent)] bg-transparent'
+                  : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
+                }
+              `}
+            >
+              Week
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowMonthPicker(false);
+                setShowYearPicker(false);
+                setShowJumpCalendar(false);
+                setViewType('month');
+              }}
+              className={`
+                rounded-md border px-2 py-1 text-xs font-medium transition-colors duration-200
+                ${viewType === 'month'
+                  ? 'border-[var(--shell-accent)] text-[var(--shell-accent)] bg-transparent'
+                  : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
+                }
+              `}
+            >
+              Month
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowMonthPicker(false);
+                setShowYearPicker(false);
+                setShowJumpCalendar(false);
+                setViewType('year');
+              }}
+              className={`
+                rounded-md border px-2 py-1 text-xs font-medium transition-colors duration-200
+                ${viewType === 'year'
+                  ? 'border-[var(--shell-accent)] text-[var(--shell-accent)] bg-transparent'
+                  : 'border-[var(--shell-border)] text-[var(--shell-text-muted)] hover:bg-[var(--shell-surface-hover)]'
+                }
+              `}
+            >
+              Year
+            </button>
+          </div>
         </div>
       </header>
 
@@ -2180,8 +2840,8 @@ export default function App() {
       <div className="flex-1 flex gap-6 min-h-0">
         <div className="relative h-full min-h-0 shrink-0">
           <div
-            className={`h-full min-h-0 transition-opacity duration-150 ${showGlobalSearch || showStatisticsOverview ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
-            aria-hidden={showGlobalSearch || showStatisticsOverview}
+            className={`h-full min-h-0 transition-opacity duration-150 ${effectiveShowGlobalSearch || effectiveShowStatisticsOverview ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
+            aria-hidden={effectiveShowGlobalSearch || effectiveShowStatisticsOverview}
           >
             <TodoSidebar
               todos={todos}
@@ -2189,41 +2849,10 @@ export default function App() {
               currentDate={currentDate}
               filteredTodos={filteredTodos}
               onDragStart={handleDragStart}
-              onAddTodo={(text, category) =>
-                setTodos((prev) => {
-                  const currentDateKey = toDateKey(currentDate);
-                  const currentWeekStart = getWeekDays(new Date(currentDate))[0].fullDate;
-                  const scopeType: TodoScopeType =
-                    viewType === 'today'
-                      ? 'day'
-                      : viewType === 'week'
-                        ? 'week'
-                        : viewType === 'year'
-                          ? 'year'
-                          : 'month';
-                  const collab =
-                    workspaceMode === 'team' && accountEmail ? normCollabEmail(accountEmail) : undefined;
-
-                  return [
-                    ...prev,
-                    {
-                      id: Date.now().toString(),
-                      text,
-                      category,
-                      color: categoryColorMap[category],
-                      month,
-                      date: scopeType === 'day' ? currentDateKey : undefined,
-                      scopeType,
-                      scopeStart: scopeType === 'week' ? currentWeekStart : undefined,
-                      scopeYear: scopeType === 'month' || scopeType === 'year' ? year : undefined,
-                      count: null,
-                      updatedAt: Date.now(),
-                      ...(collab !== undefined ? { collabOwnerEmail: collab } : {}),
-                    },
-                  ];
-                })
-              }
+              onToggleTodoComplete={handleToggleTodoComplete}
+              onAddTodo={handleAddTodo}
               onUpdateTodo={handleUpdateTodo}
+              events={events}
               onDeleteTodo={handleDeleteTodo}
               onResetLocalData={handleResetLocalData}
               onExportData={handleExportData}
@@ -2241,7 +2870,7 @@ export default function App() {
               onOpenSettings={() => setShowAccountLogin(true)}
             />
           </div>
-          {showGlobalSearch ? (
+          {effectiveShowGlobalSearch ? (
             <div className="absolute inset-0 z-30 flex min-h-0 flex-col">
               <GlobalSearchPanel
                 embedded
@@ -2257,7 +2886,7 @@ export default function App() {
               />
             </div>
           ) : null}
-          {showStatisticsOverview ? (
+          {effectiveShowStatisticsOverview ? (
             <div className="absolute inset-0 z-30 flex min-h-0 flex-col">
               <StatisticsOverviewPanel
                 filteredTodos={filteredTodos}
@@ -2333,6 +2962,8 @@ export default function App() {
         )}
 
       </div>
+        </div>
+      )}
 
       {/* Click outside to close month / year picker */}
       {(showMonthPicker || showYearPicker) && (
@@ -2364,6 +2995,6 @@ export default function App() {
         onTeamWorkspaceMeta={syncTeamWorkspaceMeta}
         onAfterLogout={handleAfterLogout}
       />
-    </div>
+    </>
   );
 }

@@ -1,8 +1,7 @@
 import { useMemo } from 'react';
-import { Check, ThumbsUp } from 'lucide-react';
+import { Smile } from 'lucide-react';
 import type { CalendarEvent, TodoItem } from '@/types';
 import { getWeekDays } from '@/lib/calendar-utils';
-import { isPeerEventInTeam } from '@/lib/teamCollab';
 
 interface WeekViewProps {
   currentDate: Date;
@@ -23,15 +22,14 @@ export default function WeekView({
   events,
   onDrop,
   onDragOver,
-  onToggleComplete,
+  onToggleComplete: _onToggleComplete,
   onDayClick,
   notesByDate,
-  todos = [],
-  workspaceMode = 'personal',
-  accountEmail = null,
-  teamOwnerEmail = null,
+  todos: _todos = [],
+  workspaceMode: _workspaceMode = 'personal',
+  accountEmail: _accountEmail = null,
+  teamOwnerEmail: _teamOwnerEmail = null,
 }: WeekViewProps) {
-  const todoMap = useMemo(() => new Map(todos.map((t) => [t.id, t])), [todos]);
   const weekDays = useMemo(() => {
     return getWeekDays(new Date(currentDate));
   }, [currentDate]);
@@ -65,18 +63,17 @@ export default function WeekView({
             className={`text-center py-2 cursor-pointer rounded-md transition-colors ${day.isToday ? 'text-[var(--shell-accent)]' : 'text-[var(--shell-subtle)]'} hover:bg-[var(--shell-surface-hover)]`}
             onClick={() => onDayClick?.(day.fullDate)}
           >
-            <div className="text-sm font-medium">{day.dayOfWeek}</div>
+            <div className="text-base font-medium md:text-sm">{day.dayOfWeek}</div>
             <div className="flex items-center justify-center gap-1">
-              <div className={`text-lg font-semibold ${day.isToday ? 'text-[var(--shell-accent)]' : 'text-[var(--shell-text-strong)]'}`}>
+              <div className={`text-xl font-semibold md:text-lg ${day.isToday ? 'text-[var(--shell-accent)]' : 'text-[var(--shell-text-strong)]'}`}>
                 {day.date}
               </div>
               {notesByDate?.[day.fullDate]?.trim() && (
-                <span className="text-[10px] leading-none px-1 py-0.5 rounded bg-[var(--shell-accent)] text-[var(--shell-accent-contrast)]">
+                <span className="rounded bg-[var(--shell-accent)] px-1 py-0.5 text-xs leading-none text-[var(--shell-accent-contrast)]">
                   记
                 </span>
               )}
             </div>
-            <div className="text-xs text-[var(--shell-subtle)]">{day.lunarDate}</div>
           </div>
         ))}
       </div>
@@ -87,12 +84,13 @@ export default function WeekView({
           const dayEvents = getEventsForDate(day.fullDate);
           const holidayEvent = dayEvents.find((e) => e.id.startsWith('holiday-'));
           const regularEvents = dayEvents.filter((e) => !e.id.startsWith('holiday-'));
+          const hasTasks = regularEvents.length > 0;
 
           return (
             <div
               key={day.fullDate}
               className={`
-                bg-[var(--shell-inset)] p-2 min-h-[120px] transition-colors duration-200
+                bg-[var(--shell-inset)] p-2 min-h-[100px] transition-colors duration-200
                 ${day.isToday ? 'ring-1 ring-[var(--shell-accent)] ring-inset' : ''}
                 hover:bg-[var(--shell-surface-hover)]
               `}
@@ -100,52 +98,28 @@ export default function WeekView({
               onDrop={(e) => handleDrop(e, day.fullDate)}
               onDragOver={handleDragOver}
             >
-              {/* Holiday */}
+              {hasTasks ? (
+                <div
+                  className="mb-1 flex justify-start"
+                  title="当天有待办日程"
+                  aria-label="当天有待办日程"
+                >
+                  <Smile
+                    className="h-[1.1rem] w-[1.1rem] shrink-0 text-[var(--shell-accent)] md:h-4 md:w-4"
+                    strokeWidth={2}
+                    aria-hidden
+                  />
+                </div>
+              ) : null}
+
               {holidayEvent && (
                 <div
-                  className="text-xs font-medium text-white px-2 py-0.5 rounded mb-1 truncate"
+                  className="mb-1 truncate rounded px-2 py-0.5 text-sm font-medium text-white md:text-xs"
                   style={{ backgroundColor: holidayEvent.color }}
                 >
                   {holidayEvent.title}
                 </div>
               )}
-
-              {/* Events */}
-              <div className="flex flex-col gap-1">
-                {regularEvents.map((event) => (
-                  <div
-                    key={event.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onToggleComplete(event.id);
-                    }}
-                    className={`
-                      text-[13px] font-medium text-white px-2 py-0.5 rounded truncate
-                      cursor-pointer transition-all duration-200 flex items-center justify-between gap-1
-                      ${event.completed ? 'opacity-50 line-through' : 'opacity-100'}
-                      hover:brightness-110
-                    `}
-                    style={{ backgroundColor: event.color }}
-                    title={
-                      isPeerEventInTeam(workspaceMode, accountEmail, teamOwnerEmail, event, todoMap)
-                        ? '队友的日程（请谨慎操作）'
-                        : event.completed
-                          ? '点击取消完成'
-                          : '点击标记完成'
-                    }
-                  >
-                    <span className="flex min-w-0 items-center gap-0.5">
-                      {isPeerEventInTeam(workspaceMode, accountEmail, teamOwnerEmail, event, todoMap) ? (
-                        <ThumbsUp className="h-3 w-3 shrink-0 text-white/90" strokeWidth={2.25} aria-hidden />
-                      ) : null}
-                      <span className="truncate">{event.title}</span>
-                    </span>
-                    {event.completed && (
-                      <Check className="w-3.5 h-3.5 text-white flex-shrink-0" strokeWidth={3} />
-                    )}
-                  </div>
-                ))}
-              </div>
             </div>
           );
         })}

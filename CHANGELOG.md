@@ -2,6 +2,9 @@
 
 ## v0.2.6
 
+- **移动端待办底栏日期行**：待办 Tab 底部在 **Today / Week / Month / Year** 分段下方增加与日历顶栏一致的 **`headerLabel` + 左右切换**；月 / 年视图支持下拉；箭头与日期间距与日历顶栏一致，整组居中。详见 `PROJECT_GUIDE.md` §2.14。
+- **移动端点「Today」**：分段选择 **`today`** 时同步 **`setCurrentDate(new Date())`**，日历 / 统计 / 待办三处一致回到当天。
+- **PWA（最快上架移动端）**：集成 **`vite-plugin-pwa`**（`manifest.webmanifest` + **Service Worker** 预缓存）；`public/` 提供 **`apple-touch-icon.png`**（180）、**`pwa-192.png`** / **`pwa-512.png`**；`index.html` 补充 **iOS 主屏幕** meta。部署须 **HTTPS**（或本机 `localhost`）；详见 `PROJECT_GUIDE.md` §2.13。
 - **统计概览联动**：`StatisticsOverviewPanel` 与顶栏 **Today / Week / Month / Year** 及 **`currentDate`** 对齐；**待办总数**、**分类分布**使用侧栏 **`filteredTodos`**；日程统计与 **`getCalendarViewRange`**（`src/lib/viewRange.ts`，与 **`App.tsx` 中 `getFilteredTodos`** 共用）区间一致；趋势图为 **单日 / 自然周七日 / 本月每日（可横向滚动）/ 本年按月**（详见 `PROJECT_GUIDE.md` §2.11）。
 - **版本对齐**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`app` 包）均为 **0.2.6**；发布安装包与 Git 标签请使用 **`v0.2.6`**（见 `.cursorrules`）。
 

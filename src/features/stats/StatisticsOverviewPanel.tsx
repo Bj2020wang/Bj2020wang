@@ -214,7 +214,7 @@ export default function StatisticsOverviewPanel({
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2.5">
             <BarChart3 className="h-7 w-7 shrink-0 text-[var(--shell-accent)]" strokeWidth={2} aria-hidden />
-            <h2 className="text-xl font-semibold tracking-tight text-[var(--shell-text-strong)]">统计概览</h2>
+            <h2 className="text-2xl font-semibold tracking-tight text-[var(--shell-text-strong)] md:text-xl">统计概览</h2>
           </div>
           <button
             type="button"
@@ -225,7 +225,7 @@ export default function StatisticsOverviewPanel({
             <X className="h-5 w-5" strokeWidth={2} />
           </button>
         </div>
-        <p className="pr-12 text-xs text-[var(--shell-text-muted)]">{scopeSubtitle(viewType, currentDate)}</p>
+        <p className="pr-12 text-sm text-[var(--shell-text-muted)] md:text-xs">{scopeSubtitle(viewType, currentDate)}</p>
       </div>
 
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
@@ -245,8 +245,8 @@ export default function StatisticsOverviewPanel({
         </div>
 
         <section className="rounded-2xl border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)]/35 p-4">
-          <h3 className="mb-3 text-sm font-semibold text-[var(--shell-text-strong)]">任务分类分布</h3>
-          <p className="mb-3 text-[11px] leading-snug text-[var(--shell-text-muted)]">
+          <h3 className="mb-3 text-base font-semibold text-[var(--shell-text-strong)] md:text-sm">任务分类分布</h3>
+          <p className="mb-3 text-sm leading-snug text-[var(--shell-text-muted)] md:text-xs">
             仅统计当前视图范围内、侧栏展示的待办分类。
           </p>
           <div className="space-y-3">
@@ -256,7 +256,7 @@ export default function StatisticsOverviewPanel({
               const pct = Math.round((count / metrics.maxCategory) * 100);
               return (
                 <div key={cat}>
-                  <div className="mb-1 flex items-center justify-between text-xs">
+                  <div className="mb-1 flex items-center justify-between text-sm md:text-xs">
                     <span className="text-[var(--shell-text-muted)]">{meta.label}</span>
                     <span className="tabular-nums font-medium text-[var(--shell-text-strong)]">{count}</span>
                   </div>
@@ -273,8 +273,8 @@ export default function StatisticsOverviewPanel({
         </section>
 
         <section className="rounded-2xl border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)]/35 p-4">
-          <h3 className="mb-2 text-sm font-semibold text-[var(--shell-text-strong)]">{trend.title}</h3>
-          <p className="mb-3 text-[11px] leading-snug text-[var(--shell-text-muted)]">{trend.hint}</p>
+          <h3 className="mb-2 text-base font-semibold text-[var(--shell-text-strong)] md:text-sm">{trend.title}</h3>
+          <p className="mb-3 text-sm leading-snug text-[var(--shell-text-muted)] md:text-xs">{trend.hint}</p>
           <div
             className={
               trendScroll
@@ -302,8 +302,8 @@ export default function StatisticsOverviewPanel({
                     title={`${b.label}：${b.count} 项`}
                   />
                 </div>
-                <span className="truncate text-[10px] text-[var(--shell-text-muted)]">{b.label}</span>
-                <span className="tabular-nums text-[11px] font-medium text-[var(--shell-text-strong)]">{b.count}</span>
+                <span className="truncate text-xs text-[var(--shell-text-muted)]">{b.label}</span>
+                <span className="tabular-nums text-sm font-medium text-[var(--shell-text-strong)]">{b.count}</span>
               </div>
             ))}
           </div>
@@ -317,8 +317,8 @@ function SummaryCard({ icon, label, value }: { icon: ReactNode; label: string; v
   return (
     <div className="rounded-2xl border border-[var(--shell-border-subtle)] bg-[var(--shell-input-deep)]/45 p-3.5">
       <div className="mb-2 flex items-center gap-2 opacity-90">{icon}</div>
-      <p className="text-[11px] font-medium text-[var(--shell-text-muted)]">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-[var(--shell-text-strong)]">{value}</p>
+      <p className="text-sm font-medium text-[var(--shell-text-muted)] md:text-xs">{label}</p>
+      <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight text-[var(--shell-text-strong)] md:text-2xl">{value}</p>
     </div>
   );
 }
