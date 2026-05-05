@@ -135,6 +135,7 @@
 
 ### 2.7 EXE 打包入口（个人使用与分发）
 - 配置：`src-tauri/tauri.conf.json`（`productName`、`version`、图标、`beforeBuildCommand` 等）。
+- **链接器约定（优先 rust-lld）**：仓库根 **`.cargo/config.toml`** 将目标 **`x86_64-pc-windows-msvc`** 的 **`linker`** 设为 **`rust-lld`**（Rust 自带的 LLVM 链接器），优先于默认 **`link.exe`**。在 Windows Defender 实时扫描、索引等占用刚生成的 `.exe`/`.dll` 时，可显著降低 **`LNK1105` / 错误代码 `1224`**（用户映射区未释放）的概率。若确需改用 MSVC 链接器，可临时移走或改写该配置文件后再构建。
 - **Windows 产物目录约定（强制与发布脚本一致）**：编译缓存与 `release` 输出统一使用固定短路径 **`C:\tbuild\app`**（通过环境变量 `CARGO_TARGET_DIR`），避免默认 `src-tauri\target` 或临时目录在杀毒/同步环境下触发链接器 **`LNK1105` / `1224`**。安装包与绿色版 exe 的路径均以该目录为准，而非项目下的 `target`。
 - **手动打包（PowerShell，与 `scripts\release.ps1` 对齐）**：在项目根目录执行前先确保目录存在，并设置下列变量再调用 Tauri：
   ```powershell
@@ -144,10 +145,11 @@
   $env:RUSTFLAGS = "-C debuginfo=0"
   npx tauri build -b nsis
   ```
+  - 说明：Rust 侧链接器由 **`.cargo/config.toml`** 使用 **`rust-lld`**；上述 **`RUSTFLAGS`** 仅关闭多余调试信息以加速链接，与链接器选择无关。
   - **安装包**：`C:\tbuild\app\release\bundle\nsis\Todo Calendar_<version>_x64-setup.exe`
   - **绿色版**：`C:\tbuild\app\release\app.exe`
 - **仅一句命令（不推荐在未排除杀毒时直接使用）**：若未设置 `CARGO_TARGET_DIR`，可在项目根执行 `npx tauri build -b nsis`（仍会先跑 `npm run build`）。此时产物在 `src-tauri\target\...`，容易在个人电脑上再次踩链接占用问题。
-- **链接仍失败时的排查**：暂停第三方杀毒与桌面同步、为 `C:\tbuild\app` 与项目目录添加 Windows Defender 排除、改用系统自带 PowerShell（非 IDE 内嵌终端）重试；详见上条环境变量组合。
+- **链接仍失败时的排查**：确认未禁用 **`.cargo/config.toml`** 中的 **`rust-lld`**；再尝试暂停第三方杀毒与桌面同步、为 **`C:\tbuild\app`** 与项目目录添加 Windows Defender 排除、改用系统自带 PowerShell（非 IDE 内嵌终端）重试；详见上条环境变量组合。
 - **归档位置**：可将生成的 `*_x64-setup.exe` 复制到仓库 `release\v<版本号>\`，与历史版本并列，便于自己或他人下载安装。
 - **正式发布**：仍需遵守 `.cursorrules`：EXE 版本号与 Git 标签一致时，用 `scripts\release.ps1`（干净工作区 + 标签校验 + 构建 + 复制到 `release/`）。
 - 已处理的拖拽兼容配置：`dragDropEnabled: false`。

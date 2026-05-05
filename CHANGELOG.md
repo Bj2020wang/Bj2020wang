@@ -2,6 +2,7 @@
 
 ## v0.2.8
 
+- **Windows 打包 / 链接**：仓库新增 **`.cargo/config.toml`**，对 **`x86_64-pc-windows-msvc`** **优先使用 `rust-lld`**，减轻 **`LNK1105` / `1224`**（杀毒或索引占用链接产物）问题；说明已写入 **`PROJECT_GUIDE.md` §2.7**。仍建议 **`CARGO_TARGET_DIR=C:\tbuild\app`**、`CARGO_BUILD_JOBS=1` 与发布脚本一致；极端环境下可再配合 Defender 排除。
 - **账号 / HTTP**：`getAccountHttpOrigin` 对 `VITE_ACCOUNT_HTTP_BASE` **自动补 `https://`**；未配置时默认预付网关与 **v0.2.5 安装包**一致；`authApi` 区分 **CloudBase 鉴权**与 **业务网关** 失败环节；`desktopFetchHint` 补充控制台「跨域设置 / 添加跨域域名」与文档「跨域校验」对应说明及迟到邮件现象说明。
 - **云函数 `newworld`**：对 HTTP 访问返回 **CORS** 响应头并处理 **`OPTIONS`** 预检，便于手机局域网访问时浏览器读到 JSON。
 - **登录 UX**：`App` 在 **`visibilitychange` / `pageshow`** 下恢复打开设置；未登录时持久化「设置曾打开 / 邮箱草稿」至 **`sessionStorage`**（见 `config.ts` 键名）；`AccountLoginModal` 回填邮箱并发码成功后清理草稿。
@@ -46,7 +47,7 @@
 - **同步健壮性**：`AccountLoginModal` 个人云定时同步与协作空闲双向路径对 `pullSnapshot` / `pushSnapshot` / `onPullSnapshot` / `onPushSnapshot` 使用 ref；`checkSyncStatus` 结合 `baseVersionRef` 与稳定 `useCallback`；快照比对辅助函数提升至模块级——降低定时同步读到过期闭包、版本判断不准等偶现问题概率。
 - **协作删笔记**：协作区删除本人笔记时保留归属（`App.tsx`），避免切回个人云时删除墓碑无法合并导致旧笔记复活（见较早提交说明）。
 - **依赖审计**：温和 `npm audit fix` 后剩余告警集中于 `@cloudbase/node-sdk` 传递链；不建议未经回归使用 `npm audit fix --force`。
-- **已知限制**：部分 Windows 环境下 `cargo clippy`/链接仍可能出现 `LNK1105`/`1224`；仓库约定将 **`CARGO_TARGET_DIR` 设为 `C:\tbuild\app`**（与 `scripts\release.ps1` 一致），并配合 `CARGO_BUILD_JOBS=1`、必要时的 Defender 排除后再纳入发布门禁。
+- **已知限制**：部分 Windows 环境下 `cargo clippy`/链接仍可能出现 `LNK1105`/`1224`；仓库约定将 **`CARGO_TARGET_DIR` 设为 `C:\tbuild\app`**（与 `scripts\release.ps1` 一致），并配合 `CARGO_BUILD_JOBS=1`、**优先 `rust-lld`**（见 **`.cargo/config.toml`** 与 **`PROJECT_GUIDE.md` §2.7**）、必要时的 Defender 排除后再纳入发布门禁。
 - **版本对齐**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`app` 包）均为 **0.2.3**；发布安装包与 Git 标签请使用 **`v0.2.3`**（见 `.cursorrules`）。
 
 ## v0.2.2
