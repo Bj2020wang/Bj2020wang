@@ -74,6 +74,7 @@
 
 ### 2.1 Todo（新增/编辑/删除/分类）
 - UI 入口：`src/components/TodoSidebar.tsx`
+- **侧栏列表**：完成按钮为 **`border-2`** 彩色圆环；**分类**在新建 / 编辑时使用 **`@/components/ui/select`**（Radix）下拉，宽度随文案收窄并与壳层色一致；**任务次数 `count`** 仍在 `App.tsx` 参与拖拽与完成逻辑，但**列表行右侧不再展示 `x/xN` 徽章**，以腾出标题宽度。
 - 业务入口：`src/App.tsx`
   - `onAddTodo(...)`
   - `handleUpdateTodo(...)`
@@ -83,9 +84,9 @@
 
 ### 2.2 日历规划（拖拽到月/周/日/年）
 - 视图文件：
-  - 月历：`CalendarGrid.tsx`
+  - 月历：`CalendarGrid.tsx`（「周一～日」标题固定，**月格子区域 `overflow-y-auto`**，避免行数多或格子过高时底部日期被裁切）
   - 周历：`WeekView.tsx`
-  - 日历：`DayView.tsx`
+  - 日历：`DayView.tsx`（**无明确时间任务区与时间刻度共用外层纵向滚动**，刻度槽位落点按刻度容器 **视口坐标**计算，便于任务多时再拖到时间轴）
   - 年度：`YearView.tsx`（仅汇总展示，拖拽规划仍在月 / 周 / 日）
 - 核心处理在 `App.tsx`：
   - `handleDrop(...)`

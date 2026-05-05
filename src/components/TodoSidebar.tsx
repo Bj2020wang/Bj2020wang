@@ -7,6 +7,13 @@ import { getWeekDays, formatDateKey } from '@/lib/calendar-utils';
 import { formatTodoScopeLabel } from '@/lib/todoScope';
 import { todoParseDatetimeLocal, todoToDatetimeLocalValue } from '@/lib/todo-datetime-local';
 import { pickPrimaryTodoTimedEvent } from '@/lib/todoCalendarLink';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 interface TodoSidebarProps {
   todos: TodoItem[];
@@ -60,6 +67,43 @@ const CATEGORY_OPTIONS: { value: TodoCategory; label: string }[] = [
   { value: 'study', label: '学习' },
   { value: 'health', label: '健康' },
 ];
+
+function TodoCategorySelect({
+  value,
+  onChange,
+  id,
+}: {
+  value: TodoCategory;
+  onChange: (next: TodoCategory) => void;
+  id?: string;
+}) {
+  return (
+    <Select value={value} onValueChange={(v) => onChange(v as TodoCategory)}>
+      <SelectTrigger
+        id={id}
+        size="sm"
+        className="min-w-0 w-fit gap-1 border-[var(--shell-border-subtle)] bg-[var(--shell-input-bg)] px-2 text-[var(--shell-text-strong)] shadow-none hover:bg-[var(--shell-surface-hover)] focus-visible:border-[var(--shell-accent)] focus-visible:ring-[var(--shell-accent)]/30 data-[size=sm]:h-8 md:text-xs [&_svg]:size-3.5"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent
+        position="popper"
+        sideOffset={4}
+        className="min-w-0 w-[var(--radix-select-trigger-width)] border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] p-0.5 text-[var(--shell-text-strong)] shadow-lg"
+      >
+        {CATEGORY_OPTIONS.map((item) => (
+          <SelectItem
+            key={item.value}
+            value={item.value}
+            className="cursor-pointer rounded-sm py-1.5 pl-1.5 pr-6 text-sm focus:bg-[var(--shell-surface-hover)] focus:text-[var(--shell-text-strong)] data-[highlighted]:bg-[var(--shell-surface-hover)] md:text-xs"
+          >
+            {item.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
 
 function dateKeyToday(): string {
   const n = new Date();
@@ -426,17 +470,11 @@ export default function TodoSidebar({
             </div>
           ) : null}
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <select
+            <TodoCategorySelect
+              id="new-todo-category"
               value={newTodoCategory}
-              onChange={(e) => setNewTodoCategory(e.target.value as TodoCategory)}
-              className="rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-input-bg)] px-2 py-1 text-sm text-[var(--shell-text-muted)] focus:outline-none md:text-xs"
-            >
-              {CATEGORY_OPTIONS.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
+              onChange={setNewTodoCategory}
+            />
             <button
               type="button"
               onClick={addTodo}
@@ -583,17 +621,7 @@ export default function TodoSidebar({
                   </div>
                 ) : null}
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <select
-                    value={editingCategory}
-                    onChange={(e) => setEditingCategory(e.target.value as TodoCategory)}
-                    className="rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-input-bg)] px-2 py-1 text-sm text-[var(--shell-text-muted)] focus:outline-none md:text-xs"
-                  >
-                    {CATEGORY_OPTIONS.map((item) => (
-                      <option key={item.value} value={item.value}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
+                  <TodoCategorySelect value={editingCategory} onChange={setEditingCategory} />
                   <button
                     type="button"
                     onClick={saveEditTodo}
@@ -682,7 +710,7 @@ export default function TodoSidebar({
                   }}
                   title={(todo.completed ?? false) ? '标记为未完成' : '标记为已完成'}
                   aria-pressed={todo.completed ?? false}
-                  className={`box-border flex h-6 w-6 shrink-0 items-center justify-center rounded-full border p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--shell-accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--shell-panel)] md:h-5 md:w-5 ${
+                  className={`box-border flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--shell-accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--shell-panel)] md:h-5 md:w-5 ${
                     todo.completed ?? false ? 'border-transparent' : 'bg-transparent'
                   }`}
                   style={
@@ -709,22 +737,7 @@ export default function TodoSidebar({
                     {todo.text}
                   </span>
                 </div>
-                <span
-                  className={`
-              rounded-full px-2 py-0.5 text-sm font-bold flex-shrink-0 md:text-xs
-              ${isEmptyCount
-                ? 'bg-[var(--shell-disabled-bg)] text-transparent'
-                : count > 1
-                  ? 'bg-[var(--shell-accent)] text-[var(--shell-accent-contrast)]'
-                  : count === 1
-                    ? 'bg-[var(--shell-disabled-bg)] text-[var(--shell-text-muted)]'
-                    : 'bg-[var(--shell-disabled-bg)] text-[var(--shell-faint)]'
-              }
-            `}
-                >
-                  {isEmptyCount ? 'x' : `x${count}`}
-                </span>
-                <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                   <button
                     type="button"
                     onClick={() => startEditTodo(todo)}

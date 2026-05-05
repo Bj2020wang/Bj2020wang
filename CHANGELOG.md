@@ -2,6 +2,9 @@
 
 ## v0.2.6
 
+- **Todo 侧栏**：分类改用 **`Select`（Radix）** 窄幅下拉；列表行**不再显示次数徽章**（`count` 逻辑不变）；完成圆圈 **`border-2`**。
+- **日历 Today**：无时刻任务与时间轴**同一滚动容器**，避免任务过多时无法滚到刻度拖拽。
+- **日历 Month**：月格子区域可**纵向滚动**，避免末行日期被裁切。
 - **移动端待办底栏日期行**：待办 Tab 底部在 **Today / Week / Month / Year** 分段下方增加与日历顶栏一致的 **`headerLabel` + 左右切换**；月 / 年视图支持下拉；箭头与日期间距与日历顶栏一致，整组居中。详见 `PROJECT_GUIDE.md` §2.14。
 - **移动端点「Today」**：分段选择 **`today`** 时同步 **`setCurrentDate(new Date())`**，日历 / 统计 / 待办三处一致回到当天。
 - **PWA（最快上架移动端）**：集成 **`vite-plugin-pwa`**（`manifest.webmanifest` + **Service Worker** 预缓存）；`public/` 提供 **`apple-touch-icon.png`**（180）、**`pwa-192.png`** / **`pwa-512.png`**；`index.html` 补充 **iOS 主屏幕** meta。部署须 **HTTPS**（或本机 `localhost`）；详见 `PROJECT_GUIDE.md` §2.13。

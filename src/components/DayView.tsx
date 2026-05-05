@@ -85,7 +85,7 @@ export default function DayView({
   const timedEvents = dayEvents.filter((e) => !e.id.startsWith('holiday-') && e.startTime);
   const untimedEvents = dayEvents.filter((e) => !e.id.startsWith('holiday-') && !e.startTime);
 
-  const timeGridRef = useRef<HTMLDivElement>(null);
+  const slotsContainerRef = useRef<HTMLDivElement>(null);
   const [dragOverSlot, setDragOverSlot] = useState<number | null>(null);
   const [draggingEventId, setDraggingEventId] = useState<string | null>(null);
 
@@ -104,18 +104,20 @@ export default function DayView({
   };
 
   // ---- Handle dropping on timeline ----
+  /** 刻度区域相对视口的纵坐标差即可（祖先滚动后 rect.top 会随之变化） */
   const calcSlotFromY = (clientY: number): number | null => {
-    if (!timeGridRef.current) return null;
-    const rect = timeGridRef.current.getBoundingClientRect();
-    const y = clientY - rect.top + timeGridRef.current.scrollTop;
+    const el = slotsContainerRef.current;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    const y = clientY - rect.top;
+    if (y < 0 || y > rect.height) return null;
     return Math.max(0, Math.min(Math.floor(y / SLOT_HEIGHT), TIME_SLOTS.length - 1));
   };
 
   const handleTimelineDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     onDragOver(e);
-    const slot = calcSlotFromY(e.clientY);
-    if (slot !== null) setDragOverSlot(slot);
+    setDragOverSlot(calcSlotFromY(e.clientY));
   };
 
   const handleTimelineDragLeave = () => {
@@ -177,68 +179,72 @@ export default function DayView({
         ) : null}
       </div>
 
-      {/* Untimed events */}
-      <div
-        className="mb-3 space-y-1 flex-shrink-0 rounded-lg border border-dashed border-[var(--shell-border-subtle)] p-2"
-        onDragOver={(e) => {
-          e.preventDefault();
-          onDragOver(e);
-        }}
-        onDrop={handleUntimedDrop}
-        title="可将时间轴任务拖到此处，暂存为无时间任务"
-      >
-        {holidayEvent && (
-          <div
-            className="inline-block rounded px-3 py-1 text-base font-medium text-white md:text-sm"
-            style={{ backgroundColor: holidayEvent.color }}
-          >
-            {holidayEvent.title}
-          </div>
-        )}
-        {untimedEvents.map((event) => (
-          <div
-            key={event.id}
-            draggable
-            onDragStart={(e) => handleEventDragStart(e, event.id)}
-            onDragEnd={handleEventDragEnd}
-            onClick={() => onToggleComplete(event.id)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer transition-all
+      {/* 无时刻任务与时间轴共用纵向滚动 */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
+        {/* Untimed events */}
+        <div
+          className="mb-3 shrink-0 space-y-1 rounded-lg border border-dashed border-[var(--shell-border-subtle)] p-2"
+          onDragOver={(e) => {
+            e.preventDefault();
+            onDragOver(e);
+          }}
+          onDrop={handleUntimedDrop}
+          title="可将时间轴任务拖到此处，暂存为无时间任务"
+        >
+          {holidayEvent && (
+            <div
+              className="inline-block rounded px-3 py-1 text-base font-medium text-white md:text-sm"
+              style={{ backgroundColor: holidayEvent.color }}
+            >
+              {holidayEvent.title}
+            </div>
+          )}
+          {untimedEvents.map((event) => (
+            <div
+              key={event.id}
+              draggable
+              onDragStart={(e) => handleEventDragStart(e, event.id)}
+              onDragEnd={handleEventDragEnd}
+              onClick={() => onToggleComplete(event.id)}
+              className={`flex cursor-pointer items-center gap-2 rounded-lg px-3 py-1.5 transition-all
               ${event.completed ? 'opacity-50 line-through' : 'opacity-100'} hover:bg-[var(--shell-surface-hover)]`}
-            title={
-              isPeerEventInTeam(workspaceMode, accountEmail, teamOwnerEmail, event, todoMap)
-                ? '队友的日程（请谨慎操作）'
-                : undefined
-            }
-          >
-            {isPeerEventInTeam(workspaceMode, accountEmail, teamOwnerEmail, event, todoMap) ? (
-              <ThumbsUp
-                className="h-3.5 w-3.5 shrink-0 text-amber-500 dark:text-amber-400"
-                strokeWidth={2.25}
-                aria-label="队友日程"
-              />
-            ) : null}
-            <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: event.color }} />
-            <span className="flex-1 text-base text-[var(--shell-text-strong)] md:text-sm">{event.title}</span>
-            {event.completed && <Check className="w-4 h-4 text-[#10B981]" strokeWidth={3} />}
-          </div>
-        ))}
-        {untimedEvents.length === 0 && (
-          <div className="px-1 py-1 text-sm text-[var(--shell-subtle)] md:text-xs">
-            无明确时间任务（可从时间轴拖拽到此）
-          </div>
-        )}
-      </div>
+              title={
+                isPeerEventInTeam(workspaceMode, accountEmail, teamOwnerEmail, event, todoMap)
+                  ? '队友的日程（请谨慎操作）'
+                  : undefined
+              }
+            >
+              {isPeerEventInTeam(workspaceMode, accountEmail, teamOwnerEmail, event, todoMap) ? (
+                <ThumbsUp
+                  className="h-3.5 w-3.5 shrink-0 text-amber-500 dark:text-amber-400"
+                  strokeWidth={2.25}
+                  aria-label="队友日程"
+                />
+              ) : null}
+              <div className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: event.color }} />
+              <span className="flex-1 text-base text-[var(--shell-text-strong)] md:text-sm">{event.title}</span>
+              {event.completed && <Check className="h-4 w-4 text-[#10B981]" strokeWidth={3} />}
+            </div>
+          ))}
+          {untimedEvents.length === 0 && (
+            <div className="px-1 py-1 text-sm text-[var(--shell-subtle)] md:text-xs">
+              无明确时间任务（可从时间轴拖拽到此）
+            </div>
+          )}
+        </div>
 
-      {/* Time grid */}
-      <div
-        ref={timeGridRef}
-        className="flex-1 overflow-y-auto relative min-h-0"
-        onDragOver={handleTimelineDragOver}
-        onDragLeave={handleTimelineDragLeave}
-        onDrop={handleTimelineDrop}
-      >
-        {/* Timed events overlay layer */}
-        <div className="absolute left-[52px] right-0 top-0 bottom-0 z-10">
+        {/* Time grid */}
+        <div
+          className="relative shrink-0 pb-2"
+          onDragOver={handleTimelineDragOver}
+          onDragLeave={handleTimelineDragLeave}
+          onDrop={handleTimelineDrop}
+        >
+          {/* Timed events overlay layer */}
+          <div
+            className="pointer-events-auto absolute left-[52px] right-0 top-0 z-10"
+            style={{ height: TIME_SLOTS.length * SLOT_HEIGHT }}
+          >
           {timedEvents.map((event) => {
             const pos = calcTimePosition(event.startTime!, event.endTime);
             const isDragging = draggingEventId === event.id;
@@ -299,7 +305,7 @@ export default function DayView({
         )}
 
         {/* Time slot rows */}
-        <div className="relative">
+        <div ref={slotsContainerRef} className="relative">
           {TIME_SLOTS.map((slot, index) => {
             const isHourMark = slot.minute === 0;
             const isDragTarget = dragOverSlot === index;
@@ -328,6 +334,7 @@ export default function DayView({
               </div>
             );
           })}
+        </div>
         </div>
       </div>
     </div>

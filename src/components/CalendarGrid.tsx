@@ -46,9 +46,9 @@ export default function CalendarGrid({
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[var(--shell-panel)] rounded-xl p-4">
+    <div className="flex min-h-0 flex-1 flex-col bg-[var(--shell-panel)] rounded-xl p-4">
       {/* Weekday Headers */}
-      <div className="grid grid-cols-7 gap-0 mb-2">
+      <div className="mb-2 grid shrink-0 grid-cols-7 gap-0">
         {WEEKDAYS.map((day) => (
           <div
             key={day}
@@ -59,8 +59,9 @@ export default function CalendarGrid({
         ))}
       </div>
 
-      {/* Calendar Grid */}
-      <div className="grid grid-cols-7 gap-px flex-1 bg-[var(--shell-grid)] border border-[var(--shell-grid)] rounded-lg overflow-hidden">
+      {/* 月格子可能高于可用高度（尤其移动端），单独纵向滚动以免末行被裁切 */}
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain">
+        <div className="grid grid-cols-7 gap-px rounded-lg border border-[var(--shell-grid)] bg-[var(--shell-grid)] overflow-hidden">
         {daysWithEvents.map((day, index) => {
           const dayEvents = day.events;
           const holidayEvent = dayEvents.find((e) => e.id.startsWith('holiday-'));
@@ -133,6 +134,7 @@ export default function CalendarGrid({
             </div>
           );
         })}
+        </div>
       </div>
     </div>
   );
