@@ -1,4 +1,4 @@
-import { getCloudbaseApp } from './cloudbase';
+import { ensureAnonymousSignIn, getCloudbaseApp } from './cloudbase';
 import { dbAuthUidFromEmail } from './dbAuthUid';
 
 export const USER_SNAPSHOTS_COLLECTION = 'user_snapshots';
@@ -40,7 +40,7 @@ type WatchOptions = {
   onError?: (err: unknown) => void;
 };
 
-type SnapshotListener = { close: () => void };
+export type SnapshotListener = { close: () => void };
 
 /**
  * 监听 user_snapshots 中当前用户的单条文档。需在组件卸载时调用返回的 close。
@@ -49,6 +49,7 @@ export async function watchUserSnapshotByEmail(
   email: string,
   opts: WatchOptions
 ): Promise<SnapshotListener> {
+  await ensureAnonymousSignIn();
   const uid = await dbAuthUidFromEmail(email);
   const db = getCloudbaseApp().database();
   // 部分环境下 watch + limit(1) 会触发 INIT_WATCH 服务端 SYS_ERR，故监听不加 limit。

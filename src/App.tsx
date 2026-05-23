@@ -1267,7 +1267,7 @@ export default function App() {
         setEvents((prev) => [...prev, newEvent]);
       }
     },
-    [currentDate, viewType, month, year, workspaceMode, accountEmail, teamOwnerEmail]
+    [currentDate, viewType, month, workspaceMode, accountEmail, teamOwnerEmail]
   );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -1469,7 +1469,7 @@ export default function App() {
             month,
             date: scopeType === 'day' ? navDateKey : undefined,
             scopeStart: scopeType === 'week' ? navWeekStart : undefined,
-            scopeYear: scopeType === 'month' || scopeType === 'year' ? year : undefined,
+            scopeYear: scopeType === 'month' || scopeType === 'year' ? currentDate.getFullYear() : undefined,
             count: null,
           };
         }
@@ -1554,7 +1554,7 @@ export default function App() {
         );
       });
     },
-    [workspaceMode, activeTeamId, teamPeerAccess, accountEmail, teamOwnerEmail, currentDate, month, year]
+    [workspaceMode, activeTeamId, teamPeerAccess, accountEmail, teamOwnerEmail, currentDate, month]
   );
 
   const handleToggleTodoComplete = useCallback(
@@ -2499,13 +2499,8 @@ export default function App() {
                       onDrop={handleDrop}
                       onDragOver={handleDragOver}
                       onDragLeave={() => {}}
-                      onToggleComplete={handleToggleComplete}
                       onDayClick={handleDayCellClick}
                       notesByDate={notesByDate}
-                      todos={todos}
-                      workspaceMode={workspaceMode}
-                      accountEmail={accountEmail}
-                      teamOwnerEmail={teamOwnerEmail}
                     />
                   ) : null}
                   {viewType === 'week' ? (
@@ -2514,13 +2509,8 @@ export default function App() {
                       events={events}
                       onDrop={handleDrop}
                       onDragOver={handleDragOver}
-                      onToggleComplete={handleToggleComplete}
                       onDayClick={handleDayCellClick}
                       notesByDate={notesByDate}
-                      todos={todos}
-                      workspaceMode={workspaceMode}
-                      accountEmail={accountEmail}
-                      teamOwnerEmail={teamOwnerEmail}
                     />
                   ) : null}
                   {viewType === 'today' ? (
@@ -2974,13 +2964,8 @@ export default function App() {
             onDrop={handleDrop}
             onDragOver={handleDragOver}
             onDragLeave={() => {}}
-            onToggleComplete={handleToggleComplete}
             onDayClick={handleDayCellClick}
             notesByDate={notesByDate}
-            todos={todos}
-            workspaceMode={workspaceMode}
-            accountEmail={accountEmail}
-            teamOwnerEmail={teamOwnerEmail}
           />
         )}
 
@@ -2990,13 +2975,8 @@ export default function App() {
             events={events}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
-            onToggleComplete={handleToggleComplete}
             onDayClick={handleDayCellClick}
             notesByDate={notesByDate}
-            todos={todos}
-            workspaceMode={workspaceMode}
-            accountEmail={accountEmail}
-            teamOwnerEmail={teamOwnerEmail}
           />
         )}
 

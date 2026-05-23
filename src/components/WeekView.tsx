@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Smile } from 'lucide-react';
-import type { CalendarEvent, TodoItem } from '@/types';
+import type { CalendarEvent } from '@/types';
 import { getWeekDays } from '@/lib/calendar-utils';
 
 interface WeekViewProps {
@@ -8,13 +8,8 @@ interface WeekViewProps {
   events: CalendarEvent[];
   onDrop: (dateStr: string) => void;
   onDragOver: (e: React.DragEvent) => void;
-  onToggleComplete: (eventId: string) => void;
   onDayClick?: (dateStr: string) => void;
   notesByDate?: Record<string, string>;
-  todos?: TodoItem[];
-  workspaceMode?: 'personal' | 'team';
-  accountEmail?: string | null;
-  teamOwnerEmail?: string | null;
 }
 
 export default function WeekView({
@@ -22,13 +17,8 @@ export default function WeekView({
   events,
   onDrop,
   onDragOver,
-  onToggleComplete: _onToggleComplete,
   onDayClick,
   notesByDate,
-  todos: _todos = [],
-  workspaceMode: _workspaceMode = 'personal',
-  accountEmail: _accountEmail = null,
-  teamOwnerEmail: _teamOwnerEmail = null,
 }: WeekViewProps) {
   const weekDays = useMemo(() => {
     return getWeekDays(new Date(currentDate));

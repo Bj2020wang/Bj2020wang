@@ -114,10 +114,12 @@ export function TodoSchedulePickerModal({
   const [selectedDateKey, setSelectedDateKey] = useState(initialDateKey);
   const [selectedTime, setSelectedTime] = useState(initialTime);
 
+  // Sync latest props when modal opens. Safe: runs once per open transition, no cascade.
   useEffect(() => {
     if (!open) return;
     const safeDate = parseDateKey(initialDateKey) ? initialDateKey : dateKeyToday();
     const p = parseDateKey(safeDate)!;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setViewYear(p.y);
     setViewMonth(p.m);
     setSelectedDateKey(safeDate);

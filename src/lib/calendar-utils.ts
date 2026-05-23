@@ -1,7 +1,7 @@
 import { Lunar } from 'lunar-javascript';
 import type { DayInfo, HolidayInfo, CalendarEvent } from '@/types';
 
-// 2024年节假日数据
+// 2024–2026 年节假日数据
 const holidayData2024: HolidayInfo = {
   '2024-01-01': { isRest: true, name: '元旦' },
   '2024-02-09': { isWork: true },
@@ -38,8 +38,87 @@ const holidayData2024: HolidayInfo = {
   '2024-10-12': { isWork: true },
 };
 
+const holidayData2025: HolidayInfo = {
+  '2025-01-01': { isRest: true, name: '元旦' },
+  '2025-01-26': { isWork: true },
+  '2025-01-28': { isRest: true, name: '春节' },
+  '2025-01-29': { isRest: true },
+  '2025-01-30': { isRest: true },
+  '2025-01-31': { isRest: true },
+  '2025-02-01': { isRest: true },
+  '2025-02-02': { isRest: true },
+  '2025-02-03': { isRest: true },
+  '2025-02-04': { isRest: true },
+  '2025-02-08': { isWork: true },
+  '2025-04-04': { isRest: true, name: '清明' },
+  '2025-04-05': { isRest: true },
+  '2025-04-06': { isRest: true },
+  '2025-05-01': { isRest: true, name: '劳动节' },
+  '2025-05-02': { isRest: true },
+  '2025-05-03': { isRest: true },
+  '2025-05-05': { isRest: true },
+  '2025-05-31': { isRest: true, name: '端午' },
+  '2025-06-01': { isRest: true },
+  '2025-06-02': { isRest: true },
+  '2025-10-01': { isRest: true, name: '国庆节' },
+  '2025-10-02': { isRest: true },
+  '2025-10-03': { isRest: true },
+  '2025-10-04': { isRest: true },
+  '2025-10-05': { isRest: true },
+  '2025-10-06': { isRest: true },
+  '2025-10-07': { isRest: true },
+  '2025-10-08': { isRest: true },
+  '2025-09-28': { isWork: true },
+  '2025-10-11': { isWork: true },
+};
+
+const holidayData2026: HolidayInfo = {
+  '2026-01-01': { isRest: true, name: '元旦' },
+  '2026-01-02': { isRest: true },
+  '2026-01-03': { isRest: true },
+  '2026-02-15': { isWork: true },
+  '2026-02-16': { isWork: true },
+  '2026-02-17': { isRest: true, name: '春节' },
+  '2026-02-18': { isRest: true },
+  '2026-02-19': { isRest: true },
+  '2026-02-20': { isRest: true },
+  '2026-02-21': { isRest: true },
+  '2026-02-22': { isRest: true },
+  '2026-02-23': { isRest: true },
+  '2026-02-28': { isWork: true },
+  '2026-04-04': { isRest: true, name: '清明' },
+  '2026-04-05': { isRest: true },
+  '2026-04-06': { isRest: true },
+  '2026-05-01': { isRest: true, name: '劳动节' },
+  '2026-05-04': { isRest: true },
+  '2026-05-05': { isRest: true },
+  '2026-06-19': { isRest: true, name: '端午' },
+  '2026-06-20': { isRest: true },
+  '2026-06-21': { isRest: true },
+  '2026-09-27': { isRest: true, name: '中秋' },
+  '2026-09-28': { isRest: true },
+  '2026-10-01': { isRest: true, name: '国庆节' },
+  '2026-10-02': { isRest: true },
+  '2026-10-03': { isRest: true },
+  '2026-10-04': { isRest: true },
+  '2026-10-05': { isRest: true },
+  '2026-10-06': { isRest: true },
+  '2026-10-07': { isRest: true },
+  '2026-10-08': { isRest: true },
+  '2026-09-26': { isWork: true },
+  '2026-10-10': { isWork: true },
+};
+
+const holidayDataByYear: Record<string, HolidayInfo> = {
+  '2024': holidayData2024,
+  '2025': holidayData2025,
+  '2026': holidayData2026,
+};
+
 export function getHolidayInfo(dateStr: string) {
-  return holidayData2024[dateStr] || null;
+  const year = dateStr.slice(0, 4);
+  const yearData = holidayDataByYear[year];
+  return yearData?.[dateStr] ?? null;
 }
 
 export function getLunarDate(date: Date): string {

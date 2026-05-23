@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Smile } from 'lucide-react';
-import type { DayInfo, CalendarEvent, TodoItem } from '@/types';
+import type { DayInfo, CalendarEvent } from '@/types';
 import { WEEKDAYS, assignEventsToDays } from '@/lib/calendar-utils';
 
 interface CalendarGridProps {
@@ -9,13 +9,8 @@ interface CalendarGridProps {
   onDrop: (dateStr: string) => void;
   onDragOver: (e: React.DragEvent) => void;
   onDragLeave: (e: React.DragEvent) => void;
-  onToggleComplete?: (eventId: string) => void;
   onDayClick?: (dateStr: string) => void;
   notesByDate?: Record<string, string>;
-  todos?: TodoItem[];
-  workspaceMode?: 'personal' | 'team';
-  accountEmail?: string | null;
-  teamOwnerEmail?: string | null;
 }
 
 export default function CalendarGrid({
@@ -23,13 +18,8 @@ export default function CalendarGrid({
   events,
   onDrop,
   onDragOver,
-  onToggleComplete: _onToggleComplete,
   onDayClick,
   notesByDate,
-  todos: _todos = [],
-  workspaceMode: _workspaceMode = 'personal',
-  accountEmail: _accountEmail = null,
-  teamOwnerEmail: _teamOwnerEmail = null,
 }: CalendarGridProps) {
   const daysWithEvents = useMemo(() => {
     return assignEventsToDays(days, events);

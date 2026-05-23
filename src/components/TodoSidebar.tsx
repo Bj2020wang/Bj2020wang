@@ -5,6 +5,7 @@ import type { AppTheme } from '@/features/theme/useAppTheme';
 import { isPeerTodoInTeam } from '@/lib/teamCollab';
 import { getWeekDays, formatDateKey } from '@/lib/calendar-utils';
 import { formatTodoScopeLabel } from '@/lib/todoScope';
+import { parseNaturalDate } from '@/lib/natural-date-parser';
 import { todoParseDatetimeLocal, todoToDatetimeLocalValue } from '@/lib/todo-datetime-local';
 import { pickPrimaryTodoTimedEvent } from '@/lib/todoCalendarLink';
 import {
@@ -173,8 +174,20 @@ export default function TodoSidebar({
   };
 
   const addTodo = () => {
-    if (newTodoText.trim()) {
-      onAddTodo(newTodoText.trim(), newTodoCategory, {
+    const text = newTodoText.trim();
+    if (text) {
+      // 仅在未手动展开时间选择器时尝试自然语言解析
+      const parsed = !newTodoWantTime ? parseNaturalDate(text) : null;
+      if (parsed && (parsed.dateKey || parsed.time)) {
+        // 解析出日期/时间 → 填入表单（时钟标识亮起），让用户确认后再次 Enter
+        setNewTodoText(parsed.title);
+        if (parsed.dateKey) setNewTodoScheduleDate(parsed.dateKey);
+        if (parsed.time) setNewTodoStartTime(parsed.time);
+        setNewTodoWantTime(true);
+        return;
+      }
+      // 无解析结果或纯文本，直接创建
+      onAddTodo(text, newTodoCategory, {
         startTime: newTodoWantTime ? newTodoStartTime : undefined,
         scheduleDate: newTodoWantTime ? newTodoScheduleDate : undefined,
       });
@@ -187,8 +200,9 @@ export default function TodoSidebar({
   const startEditTodo = (todo: TodoItem) => {
     setIsAdding(false);
     const primary = pickPrimaryTodoTimedEvent(events, todo);
-    const hasTimed = !!primary?.startTime;
-    setEditingWantTime(hasTimed);
+    // 有关联日程就开启定时，让日期/时间输入可见
+    const hasAssociatedEvent = events.some((e) => e.sourceTodoId === todo.id);
+    setEditingWantTime(hasAssociatedEvent || !!primary?.startTime);
     setEditingScheduleDate(primary?.startDate ?? dateKeyToday());
     setEditingStartTime(primary?.startTime ?? '09:00');
     setEditingTodoId(todo.id);
@@ -442,7 +456,7 @@ export default function TodoSidebar({
             value={newTodoText}
             onChange={(e) => setNewTodoText(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && addTodo()}
-            placeholder="输入新任务..."
+            placeholder="添加任务（如：明天下午3点买菜）"
             className="w-full rounded-lg border border-[var(--shell-border-subtle)] bg-[var(--shell-input-bg)] px-3 py-2 text-base text-[var(--shell-text-strong)] placeholder-[var(--shell-placeholder)] focus:border-[var(--shell-accent)] focus:outline-none md:text-sm"
             autoFocus
           />
@@ -561,6 +575,7 @@ export default function TodoSidebar({
             const isMuted = !canDrag && !isEmptyCount;
             const isPeer = isPeerTodoInTeam(workspaceMode, accountEmail, teamOwnerEmail, todo);
             const lineMuted = (todo.completed ?? false) || isMuted;
+            const todoPrimaryEvent = pickPrimaryTodoTimedEvent(events, todo);
             return (
           <div
             key={todo.id}
@@ -597,26 +612,34 @@ export default function TodoSidebar({
                   className="w-full rounded-lg border border-[var(--shell-border-subtle)] bg-[var(--shell-input-bg)] px-3 py-2 text-base text-[var(--shell-text-strong)] placeholder-[var(--shell-placeholder)] focus:border-[var(--shell-accent)] focus:outline-none md:text-sm"
                   autoFocus
                 />
-                {isMobileLayout && editingWantTime ? (
+                {isMobileLayout ? (
                   <div className="mt-2 rounded-lg border border-[var(--shell-border-subtle)] bg-[var(--shell-bg)]/50 px-3 py-2">
-                    <label className="mb-1 block text-xs text-[var(--shell-text-muted)]" htmlFor="edit-todo-datetime-local">
-                      日期与时间（系统原生，点按选择）
-                    </label>
-                    <input
-                      id="edit-todo-datetime-local"
-                      type="datetime-local"
-                      value={todoToDatetimeLocalValue(editingScheduleDate, editingStartTime)}
-                      onChange={(e) => {
-                        const parsed = todoParseDatetimeLocal(e.target.value);
-                        if (parsed) {
-                          setEditingScheduleDate(parsed.dateKey);
-                          setEditingStartTime(parsed.time);
-                        }
-                      }}
-                      className="min-h-11 w-full rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-input-bg)] px-3 py-2 text-base text-[var(--shell-text-strong)] focus:border-[var(--shell-accent)] focus:outline-none"
-                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="text-xs text-[var(--shell-text-muted)]" htmlFor="edit-todo-schedule-date-mobile">
+                        日期
+                      </label>
+                      <input
+                        id="edit-todo-schedule-date-mobile"
+                        type="date"
+                        value={editingScheduleDate}
+                        onChange={(e) => setEditingScheduleDate(e.target.value)}
+                        className="min-h-10 flex-1 rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-input-bg)] px-2 py-1 text-base text-[var(--shell-text-strong)] focus:border-[var(--shell-accent)] focus:outline-none"
+                      />
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <label className="text-xs text-[var(--shell-text-muted)]" htmlFor="edit-todo-start-time-mobile">
+                        时刻
+                      </label>
+                      <input
+                        id="edit-todo-start-time-mobile"
+                        type="time"
+                        value={editingStartTime}
+                        onChange={(e) => setEditingStartTime(e.target.value)}
+                        className="min-h-10 flex-1 rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-input-bg)] px-2 py-1 text-base text-[var(--shell-text-strong)] focus:border-[var(--shell-accent)] focus:outline-none"
+                      />
+                    </div>
                     <p className="mt-1.5 text-xs leading-snug text-[var(--shell-subtle)]">
-                      点按输入框使用系统选择器；关闭定时请再点下方时钟。
+                      时钟按钮关闭时，保存不会更新日程时间。
                     </p>
                   </div>
                 ) : null}
@@ -656,7 +679,7 @@ export default function TodoSidebar({
                     <Clock className="h-4 w-4" strokeWidth={2} aria-hidden />
                   </button>
                 </div>
-                {!isMobileLayout && editingWantTime ? (
+                {!isMobileLayout ? (
                   <div className="mt-2 space-y-2 rounded-lg border border-[var(--shell-border-subtle)] bg-[var(--shell-bg)]/50 px-3 py-2">
                     <div className="flex flex-wrap items-center gap-2">
                       <label className="text-sm text-[var(--shell-text-muted)] md:text-xs" htmlFor="edit-todo-schedule-date">
@@ -683,7 +706,7 @@ export default function TodoSidebar({
                       />
                     </div>
                     <p className="text-xs leading-snug text-[var(--shell-subtle)]">
-                      默认「今天」，与顶部 Today/Week/Month/Year 无关；保存后更新日历上的该定时日程。
+                      默认「今天」，与顶部 Today/Week/Month/Year 无关；时钟关闭时保存不会更新日程时间。
                     </p>
                   </div>
                 ) : null}
@@ -729,6 +752,7 @@ export default function TodoSidebar({
                   {!isMobileLayout ? (
                     <span className="text-sm tabular-nums leading-tight text-[var(--shell-subtle)] md:text-xs">
                       {formatTodoScopeLabel(todo, currentDate)}
+                      {todoPrimaryEvent?.startTime ? ` ${todoPrimaryEvent.startTime}` : ''}
                     </span>
                   ) : null}
                   <span
@@ -762,15 +786,6 @@ export default function TodoSidebar({
           })()
         ))}
       </div>
-
-      {/* Footer Tip（仅桌面：说明文字占高，PWA 省略） */}
-      {!isMobileLayout ? (
-        <div className="mt-4 border-t border-[var(--shell-border-subtle)] pt-4">
-          <p className="text-base text-[var(--shell-subtle)] md:text-sm">
-            每条上方为所属时间范围；仅与当前视图时间段匹配的任务会列出（另有日历安排的也会显示）。左侧彩色圆圈点一下标记完成（划线），可从该行其它区域拖到日历。
-          </p>
-        </div>
-      ) : null}
 
       {/* 笔记：桌面照常；PWA 默认折叠，避免占半屏 */}
       {isMobileLayout ? (

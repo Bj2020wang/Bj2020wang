@@ -12,7 +12,7 @@ import {
 } from './config';
 import { useSharedAccountAuth } from './useSharedAccountAuth';
 import { watchUserSnapshotByEmail } from './userSnapshotDb';
-import type { UserSnapshotDocPayload } from './userSnapshotDb';
+import type { SnapshotListener, UserSnapshotDocPayload } from './userSnapshotDb';
 import { syncDebugInfo, syncDebugWarn } from './syncDebug';
 import { formatAccountFetchErrorMessage, getLanOrRemoteOriginLoginTip } from './desktopFetchHint';
 
@@ -26,6 +26,9 @@ const ACCOUNT_LAST_PULL_AT_KEY = 'todo-calendar-account-last-pull-at';
 const ACCOUNT_LAST_PUSH_AT_KEY = 'todo-calendar-account-last-push-at';
 /** watch 不可用时用云函数 pull 轮询兜底（与手动「拉取云端」同路径，不依赖前端库可读） */
 const SNAPSHOT_POLL_INTERVAL_MS = 15_000;
+
+/** watch 只尝试一次，失败后用 HTTP 轮询兜底 */
+const WATCH_MAX_CONSECUTIVE_FAILURES = 5;
 
 type SettingsTab = 'login' | 'sync' | 'team';
 
@@ -343,45 +346,99 @@ export default function AccountLoginModal({
       }, SNAPSHOT_POLL_INTERVAL_MS);
     };
 
-    beginPersonalPoll('parallel');
+    /** sessionStorage 连续失败计数，跨刷新持久化 */
+    const WATCH_FAILURE_KEY = 'todo-calendar-watch-failures';
+    let consecutiveFailures = 0;
+    try {
+      consecutiveFailures = Number(sessionStorage.getItem(WATCH_FAILURE_KEY)) || 0;
+    } catch { /* noop */ }
 
-    void watchUserSnapshotByEmail(accountEmail, {
-      onChange: (row) => applyRemoteRow(row, 'watch'),
-      onError: (err) => {
-        const e = err as {
-          errCode?: unknown;
-          errMsg?: unknown;
-          message?: unknown;
-          original?: unknown;
-        } | null;
-        syncDebugWarn('watch-error', 'watch error', {
-          email: accountEmail,
-          errCode: e?.errCode ?? null,
-          errMsg: e?.errMsg ?? null,
-          message: e?.message ?? null,
-          original: e?.original ?? null,
-          err,
-          ts: Date.now(),
-        });
-        beginPersonalPoll('watch-failed');
-      },
-    })
-      .then((w) => {
-        if (cancelled) {
-          w.close();
-          return;
-        }
-        closeFn = w.close;
-        syncDebugInfo('watch ready', { email: accountEmail, ts: Date.now() });
-      })
-      .catch((err) => {
-        syncDebugWarn('watch-init', 'watch init failed', {
-          email: accountEmail,
-          err,
-          ts: Date.now(),
-        });
-        beginPersonalPoll('watch-failed');
+    const incFailureCount = () => {
+      try {
+        const c = Number(sessionStorage.getItem(WATCH_FAILURE_KEY)) || 0;
+        sessionStorage.setItem(WATCH_FAILURE_KEY, String(c + 1));
+      } catch { /* noop */ }
+    };
+    const resetFailureCount = () => {
+      try { sessionStorage.removeItem(WATCH_FAILURE_KEY); } catch { /* noop */ }
+    };
+
+    /** watch 创建（初始 + 重连复用） */
+    const startWatch = (): Promise<SnapshotListener> =>
+      watchUserSnapshotByEmail(accountEmail, {
+        onChange: (row) => applyRemoteRow(row, 'watch'),
+        onError: (err) => {
+          // 立即关闭旧 watch，阻止 SDK 内部 ws.onclose → resumeClients 循环
+          closeFn?.();
+          closeFn = undefined;
+
+          const e = err as {
+            errCode?: unknown;
+            errMsg?: unknown;
+            message?: unknown;
+            original?: unknown;
+          } | null;
+          syncDebugWarn('watch-error', 'watch error', {
+            email: accountEmail,
+            errCode: e?.errCode ?? null,
+            errMsg: e?.errMsg ?? null,
+            message: e?.message ?? null,
+            original: e?.original ?? null,
+            err,
+            ts: Date.now(),
+          });
+          incFailureCount();
+          beginPersonalPoll('watch-failed');
+        },
       });
+
+    /** 压制 SDK 内部 WebSocket 抛出的 unhandled rejection，仅阻止控制台输出，不操作 watch 句柄 */
+    const suppressWatchRejection = (e: PromiseRejectionEvent) => {
+      if (!(e.reason instanceof Error)) return;
+      const msg = e.reason.message;
+      if (
+        (msg.includes('Watch Error') && msg.includes('Cannot read property')) ||
+        msg.includes('wsclient.send timedout') ||
+        msg.includes('ws connection not exists')
+      ) {
+        e.preventDefault();
+        syncDebugWarn('watch-suppressed', 'SDK internal rejection caught', {
+          email: accountEmail,
+          message: msg,
+          ts: Date.now(),
+        });
+      }
+    };
+    window.addEventListener('unhandledrejection', suppressWatchRejection);
+    beginPersonalPoll('parallel');
+
+    if (consecutiveFailures >= WATCH_MAX_CONSECUTIVE_FAILURES) {
+      syncDebugWarn('watch-skip', 'skipping watch after repeated failures', {
+        email: accountEmail,
+        failures: consecutiveFailures,
+        ts: Date.now(),
+      });
+    } else {
+      startWatch()
+        .then((w) => {
+          if (cancelled) {
+            w.close();
+            return;
+          }
+          closeFn = w.close;
+          resetFailureCount();
+          syncDebugInfo('watch ready', { email: accountEmail, ts: Date.now() });
+        })
+        .catch((err) => {
+          syncDebugWarn('watch-init', 'watch init failed', {
+            email: accountEmail,
+            err,
+            ts: Date.now(),
+          });
+          incFailureCount();
+          beginPersonalPoll('watch-failed');
+        });
+    }
 
     return () => {
       cancelled = true;
@@ -390,6 +447,7 @@ export default function AccountLoginModal({
         window.clearInterval(pollTimer);
         pollTimer = undefined;
       }
+      window.removeEventListener('unhandledrejection', suppressWatchRejection);
       syncDebugInfo('watch cleanup', { email: accountEmail, ts: Date.now() });
       closeFn?.();
     };

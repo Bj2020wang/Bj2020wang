@@ -19,8 +19,14 @@
   background: var(--shell-scrollbar-hover);
 }
 
-/* Smooth transitions */
-* {
+/* Smooth transitions for interactive elements */
+button,
+a,
+input,
+select,
+textarea,
+[role="button"],
+[tabindex]:not([tabindex="-1"]) {
   transition: background-color 200ms ease, border-color 200ms ease;
 }
 
