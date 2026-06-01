@@ -10,6 +10,7 @@ import {
   TEAM_AUTO_BIDIR_ENABLED_KEY,
   teamFirstPullDoneKey,
 } from './config';
+import { initiateWechatLogin } from './wechatLogin';
 import { useSharedAccountAuth } from './useSharedAccountAuth';
 import { watchUserSnapshotByEmail } from './userSnapshotDb';
 import type { SnapshotListener, UserSnapshotDocPayload } from './userSnapshotDb';
@@ -88,6 +89,8 @@ interface AccountLoginModalProps {
   onTeamWorkspaceMeta?: (meta: { peerAccess: TeamPeerAccess; ownerEmail: string | null }) => void;
   /** 业务登出完成后：若用户选择清空本机日历，由宿主清理 localStorage 与界面状态 */
   onAfterLogout?: (opts: { clearLocalCalendar: boolean }) => void;
+  /** 打开时默认选中哪个标签（从父组件传入，用于快捷跳转） */
+  initialTab?: SettingsTab;
 }
 
 export default function AccountLoginModal({
@@ -107,6 +110,7 @@ export default function AccountLoginModal({
   teamOwnerEmail = null,
   onTeamWorkspaceMeta,
   onAfterLogout,
+  initialTab,
 }: AccountLoginModalProps) {
   const {
     businessToken,
@@ -243,8 +247,12 @@ export default function AccountLoginModal({
 
   useEffect(() => {
     if (!open) return;
-    setSettingsTab(businessToken ? 'sync' : 'login');
-  }, [open, businessToken]);
+    if (initialTab) {
+      setSettingsTab(initialTab);
+    } else {
+      setSettingsTab(businessToken ? 'sync' : 'login');
+    }
+  }, [open, businessToken, initialTab]);
 
   /** 云端 user_snapshots 变更实时合并（需验码后拿到 customLoginTicket 且控制台配置好库权限） */
   useEffect(() => {
@@ -1589,6 +1597,32 @@ export default function AccountLoginModal({
                   </button>
                 </div>
               ) : null}
+              <div className="relative mb-1 mt-4">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-[var(--shell-border-subtle)]" />
+                </div>
+                <div className="relative flex justify-center">
+                  <span className="bg-[var(--shell-panel)] px-2 text-xs text-[var(--shell-text-muted)]">或</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  try {
+                    initiateWechatLogin();
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : '微信登录启动失败');
+                  }
+                }}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--shell-border)] px-4 py-2.5 text-sm font-medium text-[var(--shell-text-strong)] hover:bg-[var(--shell-surface-hover)] disabled:opacity-50"
+              >
+                <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0" fill="none" stroke="none">
+                  <path d="M8.5 11.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2zm7 0a1 1 0 1 0 0-2 1 1 0 0 0 0 2z" fill="#07C160"/>
+                  <path d="M17 3C12.03 3 8 6.37 8 10.5c0 1.5.5 2.91 1.38 4.06l-.88 2.63 2.97-1.48c.8.24 1.64.37 2.53.37 3.87 0 7-2.69 7-6.24C21 6.15 18.85 3 17 3zm-1.5 9.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm-5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z" fill="#07C160" opacity="0.9"/>
+                </svg>
+                微信扫码登录
+              </button>
             </div>
           )}
 

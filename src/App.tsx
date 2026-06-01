@@ -24,6 +24,8 @@ import {
   ACCOUNT_SETTINGS_RESUME_OPEN_KEY,
   ACCOUNT_VERIFICATION_EMAIL_KEY,
   ACCOUNT_VERIFICATION_ID_KEY,
+  WECHAT_LOGIN_PENDING_KEY,
+  WECHAT_LOGIN_ERROR_KEY,
 } from '@/features/account/config';
 import { useSharedAccountAuth } from '@/features/account/useSharedAccountAuth';
 import * as authApi from '@/features/account/authApi';
@@ -692,6 +694,73 @@ export default function App() {
   const [noteTombstonesByDate, setNoteTombstonesByDate] = useState<Record<string, number>>(
     persisted?.noteTombstonesByDate ?? {}
   );
+
+  const applyAccountSnapshot = useCallback((snapshot: unknown) => {
+    if (!isPersistedDataLike(snapshot)) {
+      throw new Error('云端快照格式无效，无法应用到本地');
+    }
+
+    const nextDate = new Date(snapshot.currentDate);
+    if (Number.isNaN(nextDate.getTime())) {
+      throw new Error('云端快照中的日期无效');
+    }
+
+    const merged = mergeTodoRecords(
+      todosRef.current,
+      todoTombstones,
+      snapshot.todos,
+      snapshot.todoTombstones ?? {}
+    );
+    const mergedEvents = mergeEventRecords(
+      eventsRef.current,
+      eventTombstones,
+      snapshot.events,
+      snapshot.eventTombstones ?? {}
+    );
+    const mergedNotes = mergeNoteRecords(
+      notesByDate,
+      noteOwnerByDate,
+      noteMetaByDate,
+      noteTombstonesByDate,
+      snapshot.notesByDate ?? {},
+      snapshot.noteOwnerByDate ?? {},
+      snapshot.noteMetaByDate ?? {},
+      snapshot.noteTombstonesByDate ?? {}
+    );
+    const normalizedTodos = normalizeTodoColorsByCategory(merged.todos);
+    setTodos(normalizedTodos);
+    setTodoTombstones(merged.tombstones);
+    if (merged.fieldMergeCount > 0 || merged.conflictCount > 0) {
+      const parts: string[] = [];
+      if (merged.fieldMergeCount > 0) parts.push(`自动合并 ${merged.fieldMergeCount} 条`);
+      if (merged.conflictCount > 0) parts.push(`冲突保留较新 ${merged.conflictCount} 条`);
+      setTodoMergeHint(parts.join('，'));
+    } else {
+      setTodoMergeHint('');
+    }
+    if (mergedEvents.fieldMergeCount > 0 || mergedEvents.conflictCount > 0) {
+      const parts: string[] = [];
+      if (mergedEvents.fieldMergeCount > 0) parts.push(`事件自动合并 ${mergedEvents.fieldMergeCount} 条`);
+      if (mergedEvents.conflictCount > 0) parts.push(`事件冲突保留较新 ${mergedEvents.conflictCount} 条`);
+      setEventMergeHint(parts.join('，'));
+    } else {
+      setEventMergeHint('');
+    }
+    if (mergedNotes.mergeCount > 0) {
+      setNoteMergeHint(`备注自动合并 ${mergedNotes.mergeCount} 条`);
+    } else {
+      setNoteMergeHint('');
+    }
+    setEvents(normalizeEventColorsBySourceTodo(mergedEvents.events, normalizedTodos));
+    setEventTombstones(mergedEvents.tombstones);
+    // 日历导航状态（currentDate / viewType）是本地 UI 状态，不应被云端快照覆盖，
+    // 否则后台自动同步（watch / poll / 空闲双向）会导致视图突然跳转。
+    setNotesByDate(mergedNotes.notesByDate);
+    setNoteOwnerByDate(mergedNotes.noteOwnerByDate);
+    setNoteMetaByDate(mergedNotes.noteMetaByDate);
+    setNoteTombstonesByDate(mergedNotes.noteTombstonesByDate);
+  }, [eventTombstones, noteMetaByDate, noteOwnerByDate, noteTombstonesByDate, notesByDate, todoTombstones]);
+
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [showYearPicker, setShowYearPicker] = useState(false);
   const [showJumpCalendar, setShowJumpCalendar] = useState(false);
@@ -753,6 +822,7 @@ export default function App() {
   }, []);
 
   const [showAccountLogin, setShowAccountLogin] = useState(false);
+  const [accountLoginInitialTab, setAccountLoginInitialTab] = useState<'login' | 'sync' | 'team'>('login');
 
   const openAccountSettings = useCallback(() => {
     try {
@@ -760,11 +830,23 @@ export default function App() {
     } catch {
       /* ignore */
     }
+    setAccountLoginInitialTab('login');
+    setShowAccountLogin(true);
+  }, []);
+
+  const openTeamSettings = useCallback(() => {
+    try {
+      sessionStorage.setItem(ACCOUNT_SETTINGS_RESUME_OPEN_KEY, '1');
+    } catch {
+      /* ignore */
+    }
+    setAccountLoginInitialTab('team');
     setShowAccountLogin(true);
   }, []);
 
   const closeAccountSettings = useCallback(() => {
     setShowAccountLogin(false);
+    setAccountLoginInitialTab('login');
     try {
       const vid = sessionStorage.getItem(ACCOUNT_VERIFICATION_ID_KEY);
       if (!vid) {
@@ -816,6 +898,38 @@ export default function App() {
       /* ignore */
     }
   }, [businessToken]);
+
+  /** 微信登录回调完成后：触发首次云同步拉取；如有错误则弹窗提示 */
+  useEffect(() => {
+    if (!businessToken) return;
+    try {
+      const wechatError = sessionStorage.getItem(WECHAT_LOGIN_ERROR_KEY);
+      if (wechatError) {
+        sessionStorage.removeItem(WECHAT_LOGIN_ERROR_KEY);
+        window.alert(`微信登录失败：${wechatError}`);
+      }
+    } catch { /* ignore */ }
+
+    let cancelled = false;
+    try {
+      if (sessionStorage.getItem(WECHAT_LOGIN_PENDING_KEY) === 'true') {
+        sessionStorage.removeItem(WECHAT_LOGIN_PENDING_KEY);
+        pullSnapshot(businessToken)
+          .then((res) => {
+            if (cancelled) return;
+            const snap = res.data?.snapshot;
+            if (snap != null && isPersistedDataLike(snap)) {
+              applyAccountSnapshot(snap);
+            }
+          })
+          .catch((e) => {
+            console.warn('[wechat] first pull failed', e);
+          });
+      }
+    } catch { /* ignore */ }
+    return () => { cancelled = true; };
+  }, [businessToken, pullSnapshot, applyAccountSnapshot]);
+
   const [accountSyncRuntime, setAccountSyncRuntime] = useState<string>('未登录');
   const [todoMergeHint, setTodoMergeHint] = useState('');
   const [eventMergeHint, setEventMergeHint] = useState('');
@@ -1544,7 +1658,7 @@ export default function App() {
             updatedAt: Date.now(),
             ...(evCollab !== undefined ? { collabOwnerEmail: evCollab } : {}),
           };
-          return [...next, newEvent];
+          return [...next.filter((e) => e.sourceTodoId !== todoId), newEvent];
         }
 
         return prev.map((event) =>
@@ -1572,11 +1686,20 @@ export default function App() {
           return;
         }
       }
+      const nextCompleted = !(todosRef.current.find((t) => t.id === todoId)?.completed ?? false);
       setTodos((prev) =>
         prev.map((t) =>
           t.id === todoId
-            ? { ...t, completed: !(t.completed ?? false), updatedAt: Date.now() }
+            ? { ...t, completed: nextCompleted, updatedAt: Date.now() }
             : t
+        )
+      );
+      // 同步更新关联的日程事件完成状态
+      setEvents((prev) =>
+        prev.map((ev) =>
+          ev.sourceTodoId === todoId
+            ? { ...ev, completed: nextCompleted, updatedAt: Date.now() }
+            : ev
         )
       );
     },
@@ -1883,72 +2006,6 @@ export default function App() {
     !!accountEmail &&
     !!teamOwnerEmail &&
     currentNoteOwnerEmail !== normalizedMe;
-
-  const applyAccountSnapshot = useCallback((snapshot: unknown) => {
-    if (!isPersistedDataLike(snapshot)) {
-      throw new Error('云端快照格式无效，无法应用到本地');
-    }
-
-    const nextDate = new Date(snapshot.currentDate);
-    if (Number.isNaN(nextDate.getTime())) {
-      throw new Error('云端快照中的日期无效');
-    }
-
-    const merged = mergeTodoRecords(
-      todosRef.current,
-      todoTombstones,
-      snapshot.todos,
-      snapshot.todoTombstones ?? {}
-    );
-    const mergedEvents = mergeEventRecords(
-      eventsRef.current,
-      eventTombstones,
-      snapshot.events,
-      snapshot.eventTombstones ?? {}
-    );
-    const mergedNotes = mergeNoteRecords(
-      notesByDate,
-      noteOwnerByDate,
-      noteMetaByDate,
-      noteTombstonesByDate,
-      snapshot.notesByDate ?? {},
-      snapshot.noteOwnerByDate ?? {},
-      snapshot.noteMetaByDate ?? {},
-      snapshot.noteTombstonesByDate ?? {}
-    );
-    const normalizedTodos = normalizeTodoColorsByCategory(merged.todos);
-    setTodos(normalizedTodos);
-    setTodoTombstones(merged.tombstones);
-    if (merged.fieldMergeCount > 0 || merged.conflictCount > 0) {
-      const parts: string[] = [];
-      if (merged.fieldMergeCount > 0) parts.push(`自动合并 ${merged.fieldMergeCount} 条`);
-      if (merged.conflictCount > 0) parts.push(`冲突保留较新 ${merged.conflictCount} 条`);
-      setTodoMergeHint(parts.join('，'));
-    } else {
-      setTodoMergeHint('');
-    }
-    if (mergedEvents.fieldMergeCount > 0 || mergedEvents.conflictCount > 0) {
-      const parts: string[] = [];
-      if (mergedEvents.fieldMergeCount > 0) parts.push(`事件自动合并 ${mergedEvents.fieldMergeCount} 条`);
-      if (mergedEvents.conflictCount > 0) parts.push(`事件冲突保留较新 ${mergedEvents.conflictCount} 条`);
-      setEventMergeHint(parts.join('，'));
-    } else {
-      setEventMergeHint('');
-    }
-    if (mergedNotes.mergeCount > 0) {
-      setNoteMergeHint(`备注自动合并 ${mergedNotes.mergeCount} 条`);
-    } else {
-      setNoteMergeHint('');
-    }
-    setEvents(normalizeEventColorsBySourceTodo(mergedEvents.events, normalizedTodos));
-    setEventTombstones(mergedEvents.tombstones);
-    setCurrentDate(nextDate);
-    setViewType(snapshot.viewType);
-    setNotesByDate(mergedNotes.notesByDate);
-    setNoteOwnerByDate(mergedNotes.noteOwnerByDate);
-    setNoteMetaByDate(mergedNotes.noteMetaByDate);
-    setNoteTombstonesByDate(mergedNotes.noteTombstonesByDate);
-  }, [eventTombstones, noteMetaByDate, noteOwnerByDate, noteTombstonesByDate, notesByDate, todoTombstones]);
 
   /** 切回个人云时用：以个人云快照为准覆盖本地，避免与协作区内存状态合并导致队友数据残留进 user_snapshots */
   const applyPersonalSnapshotReplace = useCallback((snapshot: unknown) => {
@@ -2378,7 +2435,12 @@ export default function App() {
                       workspaceMode={workspaceMode}
                       accountEmail={accountEmail}
                       teamOwnerEmail={teamOwnerEmail}
+                      teamPeerAccess={teamPeerAccess}
+                      activeTeamId={activeTeamId}
+                      accountSyncRuntime={accountSyncRuntime}
                       onOpenSettings={openAccountSettings}
+                      onOpenTeamSettings={openTeamSettings}
+                      onSwitchToPersonalWorkspace={switchToPersonalWorkspace}
                       appTheme={theme}
                       onToggleAppTheme={toggleTheme}
                     />
@@ -2925,7 +2987,12 @@ export default function App() {
               workspaceMode={workspaceMode}
               accountEmail={accountEmail}
               teamOwnerEmail={teamOwnerEmail}
+              teamPeerAccess={teamPeerAccess}
+              activeTeamId={activeTeamId}
+              accountSyncRuntime={accountSyncRuntime}
               onOpenSettings={openAccountSettings}
+              onOpenTeamSettings={openTeamSettings}
+              onSwitchToPersonalWorkspace={switchToPersonalWorkspace}
             />
           </div>
           {effectiveShowGlobalSearch ? (
@@ -3042,6 +3109,7 @@ export default function App() {
         teamOwnerEmail={teamOwnerEmail}
         onTeamWorkspaceMeta={syncTeamWorkspaceMeta}
         onAfterLogout={handleAfterLogout}
+        initialTab={accountLoginInitialTab}
       />
     </>
   );

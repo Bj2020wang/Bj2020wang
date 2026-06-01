@@ -78,6 +78,17 @@ export function useAccountAuth() {
     }
   }, []);
 
+  const persistAccountEmail = useCallback((email: string | null) => {
+    setAccountEmail(email);
+    if (typeof window === 'undefined') return;
+    try {
+      if (email) sessionStorage.setItem(ACCOUNT_EMAIL_KEY, email);
+      else sessionStorage.removeItem(ACCOUNT_EMAIL_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   const sendCode = useCallback(async (email: string) => {
     setHint('');
     const res = await api.sendCode(email.trim());
@@ -200,6 +211,7 @@ export function useAccountAuth() {
     baseVersion,
     deviceId,
     persistBusinessToken,
+    persistAccountEmail,
     pullSnapshot,
     pushSnapshot,
     listSnapshotHistory: (token: string) => withAuthGuard(() => api.listSnapshotHistory(token)),

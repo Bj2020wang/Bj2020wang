@@ -47,6 +47,17 @@ export function teamFirstPullDoneKey(teamId: string): string {
 /** 协作工作区：与个人云同参数的空闲自动双向（拉/推检查）开关 */
 export const TEAM_AUTO_BIDIR_ENABLED_KEY = 'todo-calendar-team-auto-bidir-enabled';
 
+/** 微信开放平台 AppID（前端跳转 OAuth 用，拼接出微信 QR 码页面 URL） */
+export const WECHAT_APP_ID = import.meta.env.VITE_WECHAT_APP_ID?.trim() ?? '';
+
+/** 微信登录回调页完整 URL（CloudBase 静态托管的 wechat-callback.html） */
+export const WECHAT_CALLBACK_URL = import.meta.env.VITE_WECHAT_CALLBACK_URL?.trim() ?? '';
+
+/** sessionStorage 键：微信登录即将完成（在 main.tsx 中由回调检测写入，用于 App.tsx 触发首次拉取） */
+export const WECHAT_LOGIN_PENDING_KEY = 'todo-calendar-wechat-login-pending';
+/** sessionStorage 键：微信登录失败后的错误消息（main.tsx 检测回调写入，由 App.tsx 读取显示） */
+export const WECHAT_LOGIN_ERROR_KEY = 'todo-calendar-wechat-login-error';
+
 /**
  * 未配置 VITE_ACCOUNT_HTTP_BASE 时与 v0.2.5 等已发布安装包一致。
  * 预付型环境的「HTTP 默认域名」常为 cloudbase-prepaid-…，与控制台里的短环境 ID 拼出的 *.app.tcloudbase.com 不是同一主机；

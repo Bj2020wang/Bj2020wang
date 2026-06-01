@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, Clock, Plus, Settings, Pencil, Trash2, ThumbsUp, Sun, Moon } from 'lucide-react';
+import { Check, Clock, Plus, Settings, Pencil, Trash2, ThumbsUp, Sun, Moon, Users } from 'lucide-react';
 import type { TodoItem, ViewType, TodoCategory, CalendarEvent } from '@/types';
 import type { AppTheme } from '@/features/theme/useAppTheme';
-import { isPeerTodoInTeam } from '@/lib/teamCollab';
+import { isPeerTodoInTeam, type TeamPeerAccess } from '@/lib/teamCollab';
 import { getWeekDays, formatDateKey } from '@/lib/calendar-utils';
 import { formatTodoScopeLabel } from '@/lib/todoScope';
 import { parseNaturalDate } from '@/lib/natural-date-parser';
@@ -53,8 +53,15 @@ interface TodoSidebarProps {
   workspaceMode?: 'personal' | 'team';
   accountEmail?: string | null;
   teamOwnerEmail?: string | null;
+  teamPeerAccess?: TeamPeerAccess;
+  activeTeamId?: string | null;
+  accountSyncRuntime?: string;
   /** 打开设置（登录 / 同步 / 协作） */
   onOpenSettings?: () => void;
+  /** 直接打开设置弹窗的协作标签 */
+  onOpenTeamSettings?: () => void;
+  /** 切回个人云 */
+  onSwitchToPersonalWorkspace?: () => Promise<void>;
   /** 仅移动端：设置菜单内切换深浅主题；桌面端不传，主题仍在顶栏 */
   appTheme?: AppTheme;
   onToggleAppTheme?: () => void;
@@ -134,7 +141,12 @@ export default function TodoSidebar({
   workspaceMode = 'personal',
   accountEmail = null,
   teamOwnerEmail = null,
+  teamPeerAccess = 'bothPush',
+  activeTeamId = null,
+  accountSyncRuntime,
   onOpenSettings,
+  onOpenTeamSettings,
+  onSwitchToPersonalWorkspace,
   appTheme,
   onToggleAppTheme,
   layout = 'sidebar',
@@ -376,6 +388,18 @@ export default function TodoSidebar({
                   账号与同步…
                 </button>
               ) : null}
+              {onOpenTeamSettings && accountEmail ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenTeamSettings();
+                    setShowActionsMenu(false);
+                  }}
+                  className="w-full rounded-md px-3 py-2 text-left text-sm font-medium text-[var(--shell-text-strong)] transition-colors hover:bg-[var(--shell-surface-hover)] md:text-xs"
+                >
+                  {workspaceMode === 'team' && activeTeamId ? '协作管理…' : '创建/加入协作…'}
+                </button>
+              ) : null}
               <button
                 onClick={() => {
                   onExportData();
@@ -416,6 +440,63 @@ export default function TodoSidebar({
           )}
         </div>
       </div>
+
+      {/* 协作模式横幅 */}
+      {workspaceMode === 'team' && activeTeamId ? (
+        <div className="mb-3 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.04] p-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Users className="h-4 w-4 text-emerald-500" aria-hidden />
+              <span className="text-sm font-semibold text-emerald-500">协作空间</span>
+              <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-500">
+                {teamPeerAccess === 'bothPush'
+                  ? '双向读写'
+                  : teamPeerAccess === 'peerReadOnly'
+                    ? '队友只读'
+                    : '读全写己'}
+              </span>
+            </div>
+            {onSwitchToPersonalWorkspace ? (
+              <button
+                type="button"
+                onClick={() => { void onSwitchToPersonalWorkspace(); }}
+                className="rounded-md border border-[var(--shell-border-subtle)] bg-[var(--shell-panel)] px-2 py-1 text-xs text-[var(--shell-text-muted)] transition-colors hover:bg-[var(--shell-surface-hover)]"
+              >
+                切回个人云
+              </button>
+            ) : null}
+          </div>
+          <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-[var(--shell-subtle)]">
+            <span title={activeTeamId}>团队 {activeTeamId.slice(0, 12)}…</span>
+            {teamOwnerEmail ? <span>创建者 {teamOwnerEmail}</span> : null}
+          </div>
+          {onOpenTeamSettings ? (
+            <button
+              type="button"
+              onClick={() => { onOpenTeamSettings(); }}
+              className="mt-1 text-xs text-emerald-500 transition-colors hover:text-emerald-400"
+            >
+              协作设置 →
+            </button>
+          ) : null}
+        </div>
+      ) : !accountEmail ? null : (
+        /* 已登录但非协作：显示快速创建/加入入口 */
+        <div className="mb-3 rounded-lg border border-dashed border-[var(--shell-border-subtle)] bg-[var(--shell-surface-hover)]/50 p-2">
+          <button
+            type="button"
+            onClick={() => { onOpenTeamSettings?.(); }}
+            className="w-full text-left text-xs text-[var(--shell-text-muted)] transition-colors hover:text-[var(--shell-text-strong)]"
+          >
+            创建或加入协作空间 →
+          </button>
+        </div>
+      )}
+
+      {/* 同步状态 */}
+      {accountSyncRuntime && accountSyncRuntime !== '未登录' ? (
+        <div className="mb-2 px-1 text-xs text-[var(--shell-subtle)]">{accountSyncRuntime}</div>
+      ) : null}
 
       {/* 分类筛选：仅桌面侧栏；移动端省略以保持简洁 */}
       {!isMobileLayout ? (

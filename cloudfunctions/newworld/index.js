@@ -216,6 +216,30 @@ function httpsPostJson(urlString, body, headers) {
   });
 }
 
+function httpsGetJson(urlString) {
+  const u = new URL(urlString);
+  return new Promise(function (resolve, reject) {
+    const opts = {
+      hostname: u.hostname,
+      port: 443,
+      path: u.pathname + u.search,
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    };
+    const req = https.request(opts, function (res) {
+      var raw = '';
+      res.on('data', function (chunk) { raw += chunk; });
+      res.on('end', function () {
+        var parsed = {};
+        try { parsed = raw ? JSON.parse(raw) : {}; } catch (e) { parsed = { _parseError: true, _raw: raw }; }
+        resolve({ statusCode: res.statusCode, body: parsed });
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 async function removeTokensForEmail(email) {
   await db.collection('user_tokens').where({ email }).remove();
 }
@@ -303,6 +327,8 @@ exports.main = async function (event) {
         return await handleTeamSetPeerReadOnly(payload);
       case 'team-set-peer-access':
         return await handleTeamSetPeerAccess(payload);
+      case 'wechat-login':
+        return await handleWechatLogin(payload);
       default:
         return fail(404, 404, 'unknown action');
     }
@@ -1155,4 +1181,112 @@ async function handleTeamPush(payload) {
     version: currentVersion + 1,
     forceApplied: forcePush,
   });
+}
+
+async function handleWechatLogin(payload) {
+  var code = String(payload.code || '').trim();
+  if (!code) {
+    return fail(400, 400, '缺少授权码 code');
+  }
+
+  var appId = process.env.WECHAT_APP_ID;
+  var appSecret = process.env.WECHAT_APP_SECRET;
+  if (!appId || !appSecret) {
+    return fail(500, 500, '微信登录未配置（WECHAT_APP_ID / WECHAT_APP_SECRET）');
+  }
+
+  /* 1. 换 access_token + openid */
+  var tokenUrl =
+    'https://api.weixin.qq.com/sns/oauth2/access_token?appid=' +
+    encodeURIComponent(appId) +
+    '&secret=' +
+    encodeURIComponent(appSecret) +
+    '&code=' +
+    encodeURIComponent(code) +
+    '&grant_type=authorization_code';
+  var tr = await httpsGetJson(tokenUrl);
+  var tb = tr.body || {};
+  if (tb.errcode) {
+    var wxErrMsg = String(tb.errmsg || tb.errcode);
+    console.warn('[wechat] token exchange failed', tb.errcode, tb.errmsg);
+    if (tb.errcode === 40029) return fail(400, 400, '授权码无效或已过期，请重新扫码');
+    if (tb.errcode === 45011) return fail(429, 429, '微信接口调用过于频繁，请稍后重试');
+    return fail(502, 502, '微信登录失败：' + wxErrMsg);
+  }
+  var accessToken = tb.access_token;
+  var openid = tb.openid;
+
+  /* 2. 拿用户信息（非必须）*/
+  var nickname = '';
+  var avatar = '';
+  var infoUrl =
+    'https://api.weixin.qq.com/sns/userinfo?access_token=' +
+    encodeURIComponent(accessToken) +
+    '&openid=' +
+    encodeURIComponent(openid);
+  var ir = await httpsGetJson(infoUrl);
+  var ib = ir.body || {};
+  if (!ib.errcode && ib.nickname) {
+    nickname = String(ib.nickname || '').trim();
+    avatar = String(ib.headimgurl || '').trim();
+  }
+
+  /* 3. 计算映射 email */
+  var email =
+    'wx_' +
+    crypto
+      .createHash('sha256')
+      .update(openid)
+      .digest('hex')
+      .slice(0, 12) +
+    '@wechat.user';
+
+  /* 4. 查或创建 wechat_accounts */
+  var existing = await db.collection('wechat_accounts').where({ openid: openid }).limit(1).get();
+  var now = Date.now();
+  if (existing.data && existing.data[0]) {
+    var docId = existing.data[0]._id;
+    await db.collection('wechat_accounts').doc(docId).update({
+      lastLoginAt: now,
+      nickname: nickname,
+      avatar: avatar,
+    });
+  } else {
+    await db.collection('wechat_accounts').add({
+      openid: openid,
+      email: email,
+      nickname: nickname,
+      avatar: avatar,
+      createdAt: now,
+      lastLoginAt: now,
+    });
+  }
+
+  /* 5. 确保 auth_users 有记录 */
+  var userSnap = await db.collection('auth_users').where({ email: email }).limit(1).get();
+  if (userSnap.data && userSnap.data[0]) {
+    await db.collection('auth_users').doc(userSnap.data[0]._id).update({ lastVerifiedAt: now });
+  } else {
+    await db.collection('auth_users').add({
+      email: email,
+      createdAt: now,
+      lastVerifiedAt: now,
+    });
+  }
+
+  /* 6. 签发 businessToken */
+  var token = randomToken();
+  var expiresAt = Date.now() + TOKEN_TTL_MS;
+  await db.collection('user_tokens').add({
+    email: email,
+    token: token,
+    createdAt: now,
+    expiresAt: expiresAt,
+    deviceId: 'wechat-login',
+    platform: 'wechat',
+  });
+
+  await ensureSnapshotDbAuthUid(email);
+
+  return ok({ token: token, email: email, nickname: nickname, avatar: avatar });
 }
